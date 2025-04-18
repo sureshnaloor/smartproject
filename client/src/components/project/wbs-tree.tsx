@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, UpdateWbsProgress } from "@shared/schema";
-import { formatCurrency, formatDate, formatPercent, buildWbsHierarchy } from "@/lib/utils";
+import { formatCurrency, formatDate, formatPercent, formatShortDate, buildWbsHierarchy } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard } from "lucide-react";
+import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddWbsModal } from "./add-wbs-modal";
+import { EditWbsModal } from "./edit-wbs-modal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,10 +47,13 @@ interface TreeItemProps {
   onAddChild: (parentId: number) => void;
   onRefresh: () => void;
   onUpdateProgress: (item: WbsItem) => void;
+  onEdit: (item: WbsItem) => void;
 }
 
 export function WbsTree({ projectId }: WbsTreeProps) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedWbsItem, setSelectedWbsItem] = useState<WbsItem | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
   const { toast } = useToast();
@@ -92,6 +96,11 @@ export function WbsTree({ projectId }: WbsTreeProps) {
     // Logic to update progress (implemented in the TreeItem component)
   };
 
+  const handleEditWbsItem = (item: WbsItem) => {
+    setSelectedWbsItem(item);
+    setIsEditModalOpen(true);
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-3 p-4">
@@ -112,6 +121,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         onAddChild={handleAddChild}
         onRefresh={handleRefresh}
         onUpdateProgress={handleUpdateProgress}
+        onEdit={handleEditWbsItem}
       />
     ));
   };
@@ -185,11 +195,23 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         parentId={selectedParentId}
         onSuccess={handleRefresh}
       />
+
+      {selectedWbsItem && (
+        <EditWbsModal
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setSelectedWbsItem(null);
+          }}
+          wbsItemId={selectedWbsItem.id}
+          onSuccess={handleRefresh}
+        />
+      )}
     </div>
   );
 }
 
-function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgress }: TreeItemProps) {
+function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgress, onEdit }: TreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
@@ -366,6 +388,24 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7"
+                  onClick={() => onEdit(item)}
+                >
+                  <PencilIcon className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Edit Item</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
                   onClick={() => onUpdateProgress(item)}
                   disabled={updateProgress.isPending}
                 >
@@ -432,6 +472,7 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
               onAddChild={onAddChild}
               onRefresh={onRefresh}
               onUpdateProgress={onUpdateProgress}
+              onEdit={onEdit}
             />
           ))}
           

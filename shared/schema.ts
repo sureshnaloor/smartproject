@@ -10,6 +10,7 @@ export const projects = pgTable("projects", {
   startDate: date("start_date").notNull(),
   endDate: date("end_date").notNull(),
   budget: numeric("budget", { precision: 12, scale: 2 }).notNull(),
+  currency: text("currency").default("USD").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -62,6 +63,7 @@ export const insertProjectSchema = createInsertSchema(projects)
     budget: z.string().or(z.number()).pipe(
       z.coerce.number().positive("Budget must be a positive number")
     ),
+    currency: z.enum(["USD", "EUR", "SAR"]).default("USD"),
   });
 
 // Base WBS schema - a simpler version without all the refinements
@@ -161,6 +163,7 @@ export const extendedInsertProjectSchema = insertProjectSchema.extend({
   ),
   startDate: z.date(),
   endDate: z.date(),
+  currency: z.enum(["USD", "EUR", "SAR"]).default("USD").describe("Project currency"),
 });
 
 // Extended validation for WBS Items - use the base schema for extension

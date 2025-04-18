@@ -3,10 +3,11 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Project, WbsItem } from "@shared/schema";
 import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils";
-import { FileSpreadsheet, ChartLine, GanttChart, Menu, MoreHorizontal, BarChart2 } from "lucide-react";
+import { FileSpreadsheet, ChartLine, GanttChart, Menu, MoreHorizontal, BarChart2, PencilIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImportCostsModal } from "./import-costs-modal";
 import { DeleteProjectDialog } from "./delete-project-dialog";
+import { EditProjectModal } from "./edit-project-modal";
 import { useMobile } from "@/hooks/use-mobile";
 import {
   DropdownMenu,
@@ -25,6 +26,7 @@ interface ProjectHeaderProps {
 export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps) {
   const [location, setLocation] = useLocation();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const isMobile = useMobile();
 
   // Fetch project data
@@ -90,7 +92,7 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
           <div>
             <h1 className="text-lg font-semibold text-gray-900">{project.name}</h1>
             <div className="mt-1 flex flex-wrap items-center text-sm text-gray-500">
-              <span className="font-medium text-primary-600">{formatCurrency(project.budget)}</span>
+              <span className="font-medium text-primary-600">{formatCurrency(project.budget, project.currency || "USD")}</span>
               <span className="mx-2">•</span>
               <span>{formatDate(project.startDate)} - {formatDate(project.endDate)}</span>
               <span className="mx-2">•</span>
@@ -125,6 +127,10 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Project Actions</DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setIsEditModalOpen(true)}>
+                <PencilIcon className="mr-2 h-4 w-4" />
+                Edit Project
+              </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-red-500 focus:text-red-500"
                 onSelect={(e) => e.preventDefault()}
@@ -207,6 +213,12 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
       <ImportCostsModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
+        projectId={projectId}
+      />
+
+      <EditProjectModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
         projectId={projectId}
       />
     </div>

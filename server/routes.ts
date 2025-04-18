@@ -57,6 +57,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const project = await storage.createProject(projectData);
       
       // Create default top-level WBS items for the project - now all will be Summary type
+      const totalBudget = Number(project.budget);
+      const startDate = new Date(project.startDate);
+      const endDate = new Date(project.endDate);
+      
       const topLevelWbsItems = [
         {
           projectId: project.id,
@@ -65,9 +69,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           level: 1,
           code: "1",
           type: "Summary" as const,  // Use const assertion to fix type error
-          budgetedCost: 0,
+          budgetedCost: totalBudget * 0.05, // 5% of total budget
           isTopLevel: true,
-          description: "Engineering and design phase"
+          description: "Engineering and design phase",
+          startDate: startDate,
+          endDate: endDate,
+          duration: Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
         },
         {
           projectId: project.id,
@@ -76,9 +83,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           level: 1,
           code: "2",
           type: "Summary" as const,  // Use const assertion to fix type error
-          budgetedCost: 0,
+          budgetedCost: totalBudget * 0.85, // 85% of total budget
           isTopLevel: true,
-          description: "Procurement and construction phase"
+          description: "Procurement and construction phase",
+          startDate: startDate,
+          endDate: endDate,
+          duration: Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
         },
         {
           projectId: project.id,
@@ -87,9 +97,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           level: 1,
           code: "3",
           type: "Summary" as const,  // Use const assertion to fix type error
-          budgetedCost: 0,
+          budgetedCost: totalBudget * 0.10, // 10% of total budget
           isTopLevel: true,
-          description: "Testing and commissioning phase"
+          description: "Testing and commissioning phase",
+          startDate: startDate,
+          endDate: endDate,
+          duration: Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
         }
       ];
 

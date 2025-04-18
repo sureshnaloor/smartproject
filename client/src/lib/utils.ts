@@ -7,17 +7,30 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number | string | null | undefined): string {
-  if (amount === null || amount === undefined) return "$0.00";
+export function formatCurrency(amount: number | string | null | undefined, currency: string = "USD"): string {
+  if (amount === null || amount === undefined) return getCurrencySymbol(currency) + "0";
   
   const numAmount = typeof amount === "string" ? parseFloat(amount) : amount;
   
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(numAmount);
+}
+
+function getCurrencySymbol(currency: string): string {
+  switch (currency) {
+    case "USD":
+      return "$";
+    case "EUR":
+      return "€";
+    case "SAR":
+      return "﷼";
+    default:
+      return "$";
+  }
 }
 
 export function formatDate(date: Date | string | null | undefined): string {
