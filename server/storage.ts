@@ -56,9 +56,11 @@ export class DatabaseStorage implements IStorage {
     const result = await db.select().from(projects).where(eq(projects.id, id));
     return result[0];
   }
-
   async createProject(project: InsertProject): Promise<Project> {
-    const [newProject] = await db.insert(projects).values(project).returning();
+    const [newProject] = await db.insert(projects).values({
+      ...project,
+      budget: project.budget.toString() // Convert number to string for DB
+    }).returning();
     return newProject;
   }
 

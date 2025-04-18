@@ -200,16 +200,20 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
   const [actualEndDate, setActualEndDate] = useState<Date | undefined>(
     item.actualEndDate ? new Date(item.actualEndDate) : undefined
   );
-  
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Fetch children of this item
-  const { data: wbsItems = [] } = useQuery<WbsItem[]>({
-    queryKey: [`/api/projects/${projectId}/wbs`],
+  // Fetch child WBS items
+  const { data: childItems = [] } = useQuery<WbsItem[]>({
+    queryKey: [`/api/projects/${projectId}/wbs/children/${item.id}`],
+    queryFn: async () => {
+      const response = await fetch(`/api/projects/${projectId}/wbs`);
+      if (!response.ok) throw new Error("Failed to fetch WBS items");
+      const allItems = await response.json();
+      return allItems.filter((wbs: WbsItem) => wbs.parentId === item.id);
+    },
+    enabled: isExpanded,
   });
-
-  const children = wbsItems.filter(wbsItem => wbsItem.parentId === item.id);
 
   // Delete WBS item mutation
   const deleteWbsItem = useMutation({
@@ -225,7 +229,6 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
         variant: "default",
       });
       setIsDeleteDialogOpen(false);
-      onRefresh();
     },
     onError: (error) => {
       toast({
@@ -233,7 +236,6 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
         description: error.message || "Failed to delete WBS item. Please try again.",
         variant: "destructive",
       });
-      setIsDeleteDialogOpen(false);
     },
   });
 
@@ -251,7 +253,6 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
         variant: "default",
       });
       setIsProgressDialogOpen(false);
-      onRefresh();
     },
     onError: (error) => {
       toast({
@@ -263,6 +264,16 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
   });
 
   const handleProgressSubmit = () => {
+    // Only allow setting actual dates for Activity type
+    if (item.type !== "Activity" && (actualStartDate || actualEndDate)) {
+      toast({
+        title: "Validation Error",
+        description: "Only Activity items can have actual start and end dates.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     updateProgress.mutate({
       id: item.id,
       percentComplete: progress,
@@ -275,77 +286,90 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
     setIsExpanded(!isExpanded);
   };
 
-  const paddingLeft = `${level * 1.5}rem`;
+  const formatIndent = (level: number) => {
+    return Array(level).fill('—').join('');
+  };
 
+  const canHaveChildren = item.type !== "Activity";
+  
   return (
     <>
-      <div
-        className={`grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 hover:bg-gray-50 transition-colors ${item.isTopLevel ? 'bg-gray-50' : ''}`}
-      >
-        <div 
-          className="flex items-center" 
-          style={{ paddingLeft }}
-        >
-          {children.length > 0 ? (
-            <button 
-              onClick={toggleExpand}
-              className="mr-1 text-gray-500 p-1 hover:bg-gray-200 rounded-sm"
-            >
-              {isExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </button>
-          ) : (
-            <div className="w-6"></div>
-          )}
-          <span className={`truncate ${item.isTopLevel ? 'font-medium' : ''}`}>
-            {item.name}
-          </span>
-        </div>
-        <div className="text-sm">{item.code}</div>
-        <div className="text-sm">
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs ${
-              item.type === 'Summary'
-                ? 'bg-blue-100 text-blue-800'
-                : item.type === 'Activity'
-                ? 'bg-green-100 text-green-800'
-                : 'bg-amber-100 text-amber-800'
-            }`}
+      <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 hover:bg-gray-50">
+        <div className="flex items-center">
+          <button
+            type="button"
+            className={`mr-1 ${canHaveChildren ? 'opacity-100' : 'opacity-0'}`}
+            onClick={toggleExpand}
+            disabled={!canHaveChildren}
           >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4 text-gray-500" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-gray-500" />
+            )}
+          </button>
+          
+          <div className="ml-1" style={{ marginLeft: `${level * 16}px` }}>
+            <div className="font-medium text-sm">{item.name}</div>
+            <div className="text-xs text-gray-500">{item.description}</div>
+          </div>
+        </div>
+        
+        <div className="text-sm">
+          {item.code}
+        </div>
+        
+        <div className="text-sm">
+          <span className={`px-2 py-0.5 rounded-full text-xs ${
+            item.type === "Summary" 
+              ? "bg-blue-100 text-blue-800" 
+              : item.type === "WorkPackage" 
+                ? "bg-purple-100 text-purple-800" 
+                : "bg-green-100 text-green-800"
+          }`}>
             {item.type}
           </span>
         </div>
-        <div className="text-sm font-mono">{formatCurrency(item.budgetedCost)}</div>
-        <div className="text-sm font-mono">{formatCurrency(item.actualCost)}</div>
+        
         <div className="text-sm">
-          <div className="w-full bg-gray-200 rounded-full h-2.5 mb-1">
-            <div
-              className={`h-2.5 rounded-full ${
-                Number(item.percentComplete) >= 100
-                  ? 'bg-green-600'
-                  : Number(item.percentComplete) > 0
-                  ? 'bg-blue-600'
-                  : 'bg-gray-400'
-              }`}
-              style={{ width: `${item.percentComplete}%` }}
-            ></div>
-          </div>
-          <div className="text-xs text-gray-500">{formatPercent(item.percentComplete)}</div>
+          {item.type !== "Activity" && formatCurrency(item.budgetedCost)}
+          {item.type === "Activity" && "N/A"}
         </div>
-        <div className="flex items-center space-x-1">
+        
+        <div className="text-sm">
+          {item.type !== "Activity" && formatCurrency(item.actualCost)}
+          {item.type === "Activity" && "N/A"}
+        </div>
+        
+        <div className="text-sm">
+          <div className="flex items-center">
+            <div className="w-full bg-gray-200 rounded-full h-2 mr-2">
+              <div 
+                className="bg-blue-600 h-2 rounded-full" 
+                style={{ width: `${Math.min(100, Number(item.percentComplete))}%` }}
+              ></div>
+            </div>
+            <span className="whitespace-nowrap">{formatPercent(item.percentComplete)}</span>
+          </div>
+          {item.type === "Activity" && item.actualStartDate && (
+            <div className="text-xs text-gray-500 mt-0.5">
+              Started: {formatShortDate(item.actualStartDate)}
+            </div>
+          )}
+        </div>
+        
+        <div className="flex space-x-1">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  size="icon"
                   variant="ghost"
-                  className="h-8 w-8"
-                  onClick={() => setIsProgressDialogOpen(true)}
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => onUpdateProgress(item)}
+                  disabled={updateProgress.isPending}
                 >
-                  <Clipboard className="h-4 w-4" />
+                  <Edit className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
@@ -353,34 +377,37 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8"
-                  onClick={() => onAddChild(item.id)}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Add Child Item</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
+          
+          {canHaveChildren && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => onAddChild(item.id)}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Add Child Item</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          
           {!item.isTopLevel && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    size="icon"
                     variant="ghost"
-                    className="h-8 w-8 text-red-500"
+                    size="icon"
+                    className="h-7 w-7 text-red-600"
                     onClick={() => setIsDeleteDialogOpen(true)}
+                    disabled={deleteWbsItem.isPending}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -393,10 +420,10 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
           )}
         </div>
       </div>
-
-      {isExpanded && children.length > 0 && (
-        <div>
-          {children.map((child) => (
+      
+      {isExpanded && (
+        <div className="divide-y divide-gray-100">
+          {childItems.map((child) => (
             <TreeItem
               key={child.id}
               item={child}
@@ -407,24 +434,28 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
               onUpdateProgress={onUpdateProgress}
             />
           ))}
+          
+          {childItems.length === 0 && (
+            <div className="text-sm text-gray-500 py-2 px-4 pl-12" style={{ paddingLeft: `${(level + 2) * 16 + 24}px` }}>
+              No child items found. Click the + button to add one.
+            </div>
+          )}
         </div>
       )}
-
-      {/* Delete Confirmation Dialog */}
+      
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete WBS Item</AlertDialogTitle>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{item.name}"? This action cannot be undone,
-              and will also delete all child items and associated data.
+              This will permanently delete the WBS item "{item.name}" and all its children. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
+            <AlertDialogAction 
               onClick={() => deleteWbsItem.mutate()}
+              className="bg-red-600 hover:bg-red-700"
             >
               {deleteWbsItem.isPending ? (
                 <>
@@ -441,71 +472,70 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Update Progress Dialog */}
+      
       <Dialog open={isProgressDialogOpen} onOpenChange={setIsProgressDialogOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Update Progress</DialogTitle>
           </DialogHeader>
+          
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="progress">Progress Percentage</Label>
-              <div className="flex items-center">
-                <Input
-                  id="progress"
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={progress}
-                  onChange={(e) => setProgress(Number(e.target.value))}
-                  className="mr-2"
-                />
-                <span>%</span>
-              </div>
-            </div>
-            
-            <div className="grid gap-2">
-              <Label>Actual Start Date</Label>
-              <DatePicker
-                date={actualStartDate}
-                setDate={setActualStartDate}
-                placeholder="Select actual start date"
+              <Input
+                id="progress"
+                type="number"
+                min="0"
+                max="100"
+                value={progress}
+                onChange={(e) => setProgress(Number(e.target.value))}
               />
             </div>
             
-            <div className="grid gap-2">
-              <Label>Actual End Date</Label>
-              <DatePicker
-                date={actualEndDate}
-                setDate={setActualEndDate}
-                placeholder="Select actual end date"
-                disabledDates={(date) => actualStartDate ? date < actualStartDate : false}
-              />
-            </div>
+            {/* Only show date fields for Activity items */}
+            {item.type === "Activity" && (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="actual-start-date">Actual Start Date</Label>
+                  <DatePicker
+                    date={actualStartDate}
+                    setDate={setActualStartDate}
+                  />
+                </div>
+                
+                <div className="grid gap-2">
+                  <Label htmlFor="actual-end-date">Actual End Date</Label>
+                  <DatePicker
+                    date={actualEndDate}
+                    setDate={setActualEndDate}
+                    disabledDates={(date: Date): boolean => {
+                      return actualStartDate ? date < actualStartDate : false;
+                    }}
+                  />
+                </div>
+              </>
+            )}
           </div>
+          
           <DialogFooter>
-            <Button
-              variant="outline"
+            <Button 
+              variant="outline" 
               onClick={() => setIsProgressDialogOpen(false)}
             >
               Cancel
             </Button>
             <Button
+              type="submit"
               onClick={handleProgressSubmit}
               disabled={updateProgress.isPending}
             >
-              {updateProgress.isPending ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Updating...
-                </>
-              ) : (
-                "Update Progress"
+              {updateProgress.isPending && (
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
               )}
+              Update
             </Button>
           </DialogFooter>
         </DialogContent>

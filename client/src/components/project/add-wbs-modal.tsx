@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -49,6 +49,7 @@ interface AddWbsModalProps {
 
 export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuccess }: AddWbsModalProps) {
   const [showDuration, setShowDuration] = useState(true);
+  const [allowedTypes, setAllowedTypes] = useState<string[]>(["Summary"]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -89,34 +90,95 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
       description: "",
       level: calculateLevel(),
       code: calculateNextCode(),
-      type: "Activity",
+      type: "Summary", // Default to Summary, will be updated in useEffect
       budgetedCost: 0,
       startDate: new Date(),
       endDate: new Date(new Date().setDate(new Date().getDate() + 7)),
       duration: 7,
-      isTopLevel: false,
+      isTopLevel: !parentId,
     },
   });
 
+  // Update allowed types when parent changes
+  useEffect(() => {
+    let newAllowedTypes: string[] = ["Summary"];
+    
+    if (!parentId) {
+      // Top-level items can only be Summary
+      newAllowedTypes = ["Summary"];
+    } else if (parentItem?.type === "Summary") {
+      // Under Summary, can be either Summary or WorkPackage
+      newAllowedTypes = ["Summary", "WorkPackage"];
+    } else if (parentItem?.type === "WorkPackage") {
+      // Under WorkPackage, can only be Activity
+      newAllowedTypes = ["Activity"];
+    }
+    
+    setAllowedTypes(newAllowedTypes);
+    
+  }, [parentId, parentItem]);
+
   // Get form values
-  const { startDate, endDate, duration } = form.watch();
+  const { startDate, endDate, duration, type } = form.watch();
+
+  // Update form fields based on WBS type
+  useEffect(() => {
+    if (type === "Summary" || type === "WorkPackage") {
+      // For Summary and WorkPackage: set default dates but hide them in the UI
+      // This is a workaround for the database constraint while the schema is being updated
+      const defaultDate = new Date();
+      form.setValue("startDate", defaultDate);
+      form.setValue("endDate", defaultDate);
+      form.setValue("duration", 1);
+    } else if (type === "Activity") {
+      // For Activity: has dates but no budget
+      form.setValue("budgetedCost", 0);
+      
+      // Set default dates if they're undefined
+      if (!form.getValues("startDate")) {
+        form.setValue("startDate", new Date());
+      }
+      if (!form.getValues("endDate")) {
+        const newEndDate = new Date();
+        newEndDate.setDate(newEndDate.getDate() + 7);
+        form.setValue("endDate", newEndDate);
+      }
+      if (!form.getValues("duration")) {
+        form.setValue("duration", 7);
+      }
+    }
+  }, [type, form]);
 
   // Update dates and duration when one changes
   const updateDatesAndDuration = (field: 'startDate' | 'endDate' | 'duration', value: any) => {
     if (field === 'startDate' && endDate) {
-      const newDuration = calculateDuration(value, new Date(endDate));
+      // Calculate new duration based on the date range
+      const startDate = value;
+      const endDateObj = new Date(endDate);
+      const newDuration = calculateDuration(startDate, endDateObj);
+      
+      // Update form values
       form.setValue('duration', newDuration);
-      form.setValue(field, value);
+      form.setValue(field, value); // Store as Date object
     } 
     else if (field === 'endDate' && startDate) {
-      const newDuration = calculateDuration(new Date(startDate), value);
+      // Calculate new duration based on the date range
+      const startDateObj = new Date(startDate);
+      const endDate = value;
+      const newDuration = calculateDuration(startDateObj, endDate);
+      
+      // Update form values
       form.setValue('duration', newDuration);
-      form.setValue(field, value);
+      form.setValue(field, value); // Store as Date object
     }
     else if (field === 'duration' && startDate) {
-      const newEndDate = new Date(startDate);
+      // Calculate new end date based on start date and duration
+      const startDateObj = new Date(startDate);
+      const newEndDate = new Date(startDateObj);
       newEndDate.setDate(newEndDate.getDate() + Number(value) - 1);
-      form.setValue('endDate', newEndDate);
+      
+      // Update form values
+      form.setValue('endDate', newEndDate); // Store as Date object
       form.setValue(field, Number(value));
     }
   };
@@ -171,9 +233,9 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                 <FormItem>
                   <FormLabel>Parent WBS</FormLabel>
                   <Select
-                    value={field.value?.toString() || ""}
+                    value={field.value?.toString() || "none"}
                     onValueChange={(value) => {
-                      const newParentId = value === "" ? null : parseInt(value);
+                      const newParentId = value === "none" ? null : parseInt(value);
                       field.onChange(newParentId);
                       
                       // Update level and code when parent changes
@@ -187,18 +249,33 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                         ? `${parent.code}.${siblings.length + 1}`
                         : `${wbsItems.filter(item => !item.parentId).length + 1}`;
                       form.setValue("code", newCode);
+
+                      // Set isTopLevel flag
+                      form.setValue("isTopLevel", !newParentId);
+
+                      // Update type based on parent
+                      if (!newParentId) {
+                        // Top-level items can only be Summary
+                        form.setValue("type", "Summary");
+                      } else if (parent?.type === "Summary") {
+                        // Under Summary, default to WorkPackage
+                        form.setValue("type", "WorkPackage");
+                      } else if (parent?.type === "WorkPackage") {
+                        // Under WorkPackage, can only be Activity
+                        form.setValue("type", "Activity");
+                      }
                     }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select a parent WBS item" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No Parent (Top Level)</SelectItem>
+                      <SelectItem value="none">No Parent (Top Level)</SelectItem>
                       {wbsItems
-                        .filter(item => item.type === "Summary")
+                        .filter(item => item.type !== "Activity") // Activities can't have children
                         .map((item) => (
                           <SelectItem key={item.id} value={item.id.toString()}>
-                            {item.code} - {item.name}
+                            {item.code} - {item.name} ({item.type})
                           </SelectItem>
                         ))}
                     </SelectContent>
@@ -240,11 +317,25 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                         <SelectValue placeholder="Select a type" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Summary">Summary</SelectItem>
-                        <SelectItem value="Activity">Activity</SelectItem>
-                        <SelectItem value="Task">Task</SelectItem>
+                        {allowedTypes.includes("Summary") && (
+                          <SelectItem value="Summary">Summary</SelectItem>
+                        )}
+                        {allowedTypes.includes("WorkPackage") && (
+                          <SelectItem value="WorkPackage">Work Package</SelectItem>
+                        )}
+                        {allowedTypes.includes("Activity") && (
+                          <SelectItem value="Activity">Activity</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
+                    <FormDescription>
+                      {!parentId ? 
+                        "Top-level items must be Summary type" : 
+                        parentItem?.type === "WorkPackage" ? 
+                          "WorkPackage items can only have Activity children" :
+                          "Summary items can have Summary or WorkPackage children"
+                      }
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -282,98 +373,37 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                         min="0"
                         placeholder="0.00"
                         {...field}
+                        disabled={type === "Activity"}
                       />
                     </FormControl>
+                    <FormDescription>
+                      {type === "Activity" ? 
+                        "Activity items cannot have a budget" : 
+                        "Budget for this work item"
+                      }
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <FormField
-                control={form.control}
-                name="startDate"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Start Date</FormLabel>
-                    <FormControl>
-                      <DatePicker
-                        date={field.value ? new Date(field.value) : undefined}
-                        setDate={(date) => {
-                          if (date) {
-                            updateDatesAndDuration('startDate', date);
-                          }
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {showDuration ? (
+            {/* Only show date fields for Activity type */}
+            {type === "Activity" && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
-                  name="duration"
+                  name="startDate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>
-                        Duration (days)
-                        <Button
-                          type="button"
-                          variant="link"
-                          className="ml-2 p-0 h-auto text-xs"
-                          onClick={() => setShowDuration(false)}
-                        >
-                          Switch to End Date
-                        </Button>
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min="1"
-                          placeholder="1"
-                          {...field}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value);
-                            if (!isNaN(value) && value > 0) {
-                              updateDatesAndDuration('duration', value);
-                            }
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ) : (
-                <FormField
-                  control={form.control}
-                  name="endDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        End Date
-                        <Button
-                          type="button"
-                          variant="link"
-                          className="ml-2 p-0 h-auto text-xs"
-                          onClick={() => setShowDuration(true)}
-                        >
-                          Switch to Duration
-                        </Button>
-                      </FormLabel>
+                      <FormLabel>Start Date</FormLabel>
                       <FormControl>
                         <DatePicker
-                          date={field.value ? new Date(field.value) : undefined}
+                          date={field.value}
                           setDate={(date) => {
                             if (date) {
-                              updateDatesAndDuration('endDate', date);
+                              updateDatesAndDuration('startDate', date);
                             }
-                          }}
-                          disabledDates={(date) => {
-                            return startDate && date < new Date(startDate);
                           }}
                         />
                       </FormControl>
@@ -381,8 +411,98 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                     </FormItem>
                   )}
                 />
-              )}
 
+                {showDuration ? (
+                  <FormField
+                    control={form.control}
+                    name="duration"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          Duration (days)
+                          <Button
+                            type="button"
+                            variant="link"
+                            className="ml-2 p-0 h-auto text-xs"
+                            onClick={() => setShowDuration(false)}
+                          >
+                            Switch to End Date
+                          </Button>
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min="1"
+                            placeholder="1"
+                            {...field}
+                            onChange={(e) => {
+                              const value = parseInt(e.target.value);
+                              if (!isNaN(value) && value > 0) {
+                                updateDatesAndDuration('duration', value);
+                              }
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                ) : (
+                  <FormField
+                    control={form.control}
+                    name="endDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          End Date
+                          <Button
+                            type="button"
+                            variant="link"
+                            className="ml-2 p-0 h-auto text-xs"
+                            onClick={() => setShowDuration(true)}
+                          >
+                            Switch to Duration
+                          </Button>
+                        </FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            date={field.value}
+                            setDate={(date) => {
+                              if (date) {
+                                updateDatesAndDuration('endDate', date);
+                              }
+                            }}
+                            disabledDates={(date: Date): boolean => {
+                              return startDate ? date < startDate : false;
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <FormField
+                  control={form.control}
+                  name="level"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>WBS Level</FormLabel>
+                      <FormControl>
+                        <Input {...field} readOnly />
+                      </FormControl>
+                      <FormDescription>
+                        Automatically determined
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            )}
+
+            {type !== "Activity" && (
               <FormField
                 control={form.control}
                 name="level"
@@ -399,7 +519,7 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                   </FormItem>
                 )}
               />
-            </div>
+            )}
 
             <FormField
               control={form.control}
@@ -411,7 +531,12 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                     <Textarea
                       placeholder="Optional description"
                       rows={3}
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                      name={field.name}
+                      disabled={field.disabled}
                     />
                   </FormControl>
                   <FormMessage />

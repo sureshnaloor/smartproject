@@ -29,14 +29,21 @@ export function CostControl({ projectId }: CostControlProps) {
     queryKey: [`/api/projects/${projectId}/wbs`],
   });
 
-  // Filter WBS items based on view mode
+  // Filter WBS items based on view mode and type
+  // Only include Summary and WorkPackage types which have budgets
   const filteredItems = useMemo(() => {
+    // First filter by type - only Summary and WorkPackage have budgets
+    const budgetableItems = wbsItems.filter(item => 
+      item.type === "Summary" || item.type === "WorkPackage"
+    );
+    
+    // Then filter by level
     if (viewMode === "level1") {
-      return wbsItems.filter(item => item.level === 1);
+      return budgetableItems.filter(item => item.level === 1);
     } else if (viewMode === "level2") {
-      return wbsItems.filter(item => item.level <= 2);
+      return budgetableItems.filter(item => item.level <= 2);
     }
-    return wbsItems;
+    return budgetableItems;
   }, [wbsItems, viewMode]);
 
   // Group and sort items
@@ -87,7 +94,7 @@ export function CostControl({ projectId }: CostControlProps) {
             <SelectContent>
               <SelectItem value="level1">By WBS Level 1</SelectItem>
               <SelectItem value="level2">By WBS Level 2</SelectItem>
-              <SelectItem value="all">All WBS Items</SelectItem>
+              <SelectItem value="all">All Budgeted Items</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -95,7 +102,7 @@ export function CostControl({ projectId }: CostControlProps) {
         <div className="space-y-4">
           {groupedItems.items.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
-              No WBS items found. Add items to see cost data.
+              No budgeted WBS items found. Add Summary or WorkPackage items to see cost data.
             </div>
           ) : (
             <>
@@ -104,9 +111,9 @@ export function CostControl({ projectId }: CostControlProps) {
                   <div className="flex justify-between items-center mb-1">
                     <div className="flex items-center">
                       <span className="text-sm font-medium">{item.name}</span>
-                      {item.level === 1 && (
-                        <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Level 1</span>
-                      )}
+                      <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                        {item.type}
+                      </span>
                     </div>
                     <div className="text-sm">
                       <span className="font-mono">{formatCurrency(item.actualCost)}</span>
@@ -198,101 +205,78 @@ export function CostControl({ projectId }: CostControlProps) {
           </div>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead>
-              <tr>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">WBS Element</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Planned Value</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Earned Value</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Cost</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CV</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CPI</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {groupedItems.items.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center text-gray-500 py-4">
-                    No WBS items found. Add items to see variance analysis.
-                  </td>
-                </tr>
-              ) : (
-                <>
-                  {groupedItems.items.map(item => {
-                    const earnedValue = calculateEarnedValue(
-                      Number(item.budgetedCost),
-                      Number(item.percentComplete)
-                    );
-                    const costVariance = earnedValue - Number(item.actualCost);
-                    const cpi = Number(item.actualCost) > 0
-                      ? earnedValue / Number(item.actualCost)
-                      : 1;
-                    
-                    return (
-                      <tr key={item.id}>
-                        <td className="px-3 py-2 text-sm font-medium">{item.name}</td>
-                        <td className="px-3 py-2 text-sm text-right font-mono">
-                          {formatCurrency(item.budgetedCost)}
-                        </td>
-                        <td className="px-3 py-2 text-sm text-right font-mono">
-                          {formatCurrency(earnedValue)}
-                        </td>
-                        <td className="px-3 py-2 text-sm text-right font-mono">
-                          {formatCurrency(item.actualCost)}
-                        </td>
-                        <td className={cn(
-                          "px-3 py-2 text-sm text-right font-mono",
-                          costVariance < 0 ? "text-red-600" : "text-green-600"
-                        )}>
-                          {costVariance < 0 ? "-" : "+"}
-                          {formatCurrency(Math.abs(costVariance))}
-                        </td>
-                        <td className={cn(
-                          "px-3 py-2 text-sm text-right",
-                          cpi < 1 ? "text-red-600" : "text-green-600"
-                        )}>
-                          {cpi.toFixed(2)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  
-                  {/* Project Totals */}
-                  <tr className="bg-gray-50">
-                    <td className="px-3 py-2 text-sm font-semibold">Project Total</td>
-                    <td className="px-3 py-2 text-sm text-right font-semibold font-mono">
-                      {formatCurrency(groupedItems.totalBudget)}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-right font-semibold font-mono">
-                      {formatCurrency(groupedItems.totalEarnedValue)}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-right font-semibold font-mono">
-                      {formatCurrency(groupedItems.totalActual)}
-                    </td>
-                    <td className={cn(
-                      "px-3 py-2 text-sm text-right font-semibold font-mono",
-                      groupedItems.costVariance < 0 ? "text-red-600" : "text-green-600"
-                    )}>
-                      {groupedItems.costVariance < 0 ? "-" : "+"}
-                      {formatCurrency(Math.abs(groupedItems.costVariance))}
-                    </td>
-                    <td className={cn(
-                      "px-3 py-2 text-sm text-right font-semibold",
-                      groupedItems.costPerformanceIndex < 1 ? "text-red-600" : "text-green-600"
-                    )}>
-                      {groupedItems.costPerformanceIndex.toFixed(2)}
-                    </td>
-                  </tr>
-                </>
-              )}
-            </tbody>
-          </table>
-        </div>
-        
-        <div className="mt-4 text-sm text-gray-500">
-          <p>CV = Earned Value - Actual Cost</p>
-          <p>CPI = Earned Value / Actual Cost</p>
+        <div className="space-y-6">
+          {/* Cost Performance Index */}
+          <div>
+            <h4 className="text-sm font-medium mb-2">Cost Performance Index (CPI)</h4>
+            <div className="flex items-center justify-between">
+              <div className="text-2xl font-semibold font-mono">
+                {groupedItems.costPerformanceIndex.toFixed(2)}
+              </div>
+              <div className={cn(
+                "px-2 py-1 rounded text-sm font-medium",
+                groupedItems.costPerformanceIndex >= 1
+                  ? "bg-green-100 text-green-800"
+                  : "bg-red-100 text-red-800"
+              )}>
+                {groupedItems.costPerformanceIndex >= 1.1
+                  ? "Excellent"
+                  : groupedItems.costPerformanceIndex >= 1
+                  ? "On Budget"
+                  : groupedItems.costPerformanceIndex >= 0.9
+                  ? "Slightly Over"
+                  : "Over Budget"}
+              </div>
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              CPI = Earned Value / Actual Cost
+              {groupedItems.costPerformanceIndex < 1 
+                ? ". A value less than 1 indicates the project is over budget."
+                : ". A value greater than 1 indicates the project is under budget."}
+            </div>
+          </div>
+          
+          {/* Earned Value */}
+          <div>
+            <h4 className="text-sm font-medium mb-2">Earned Value</h4>
+            <div className="text-2xl font-semibold font-mono">
+              {formatCurrency(groupedItems.totalEarnedValue)}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Value of work completed based on budget and progress
+            </div>
+          </div>
+          
+          {/* Cost Variance */}
+          <div>
+            <h4 className="text-sm font-medium mb-2">Cost Variance</h4>
+            <div className="flex items-center">
+              <div className="text-2xl font-semibold font-mono">
+                {groupedItems.costVariance > 0 ? "+" : ""}
+                {formatCurrency(groupedItems.costVariance)}
+              </div>
+              <div className={cn(
+                "ml-3 px-2 py-1 rounded text-sm font-medium",
+                groupedItems.costVariance >= 0
+                  ? "bg-green-100 text-green-800"
+                  : "bg-red-100 text-red-800"
+              )}>
+                {groupedItems.costVariance >= 0 ? "Under Budget" : "Over Budget"}
+              </div>
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Difference between earned value and actual cost
+            </div>
+          </div>
+          
+          {/* Notes */}
+          <div className="p-3 bg-blue-50 rounded-md text-sm text-blue-700 mt-4">
+            <p className="font-medium mb-1">Note:</p>
+            <p>
+              This analysis only considers Summary and WorkPackage items with budgets. 
+              Activity items do not have associated budgets in the new structure.
+            </p>
+          </div>
         </div>
       </div>
     </div>

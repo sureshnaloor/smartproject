@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertProjectSchema, insertWbsItemSchema, insertDependencySchema, insertCostEntrySchema, updateWbsProgressSchema, csvImportSchema } from "@shared/schema";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
+import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -55,7 +56,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const projectData = insertProjectSchema.parse(req.body);
       const project = await storage.createProject(projectData);
       
-      // Create default top-level WBS items for the project
+      // Create default top-level WBS items for the project - now all will be Summary type
       const topLevelWbsItems = [
         {
           projectId: project.id,
@@ -63,11 +64,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: "Engineering & Design",
           level: 1,
           code: "1",
-          type: "Summary",
+          type: "Summary" as const,  // Use const assertion to fix type error
           budgetedCost: 0,
-          startDate: new Date(project.startDate),
-          endDate: new Date(project.endDate),
-          duration: Math.ceil((new Date(project.endDate).getTime() - new Date(project.startDate).getTime()) / (1000 * 60 * 60 * 24)),
           isTopLevel: true,
           description: "Engineering and design phase"
         },
@@ -77,11 +75,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: "Procurement & Construction",
           level: 1,
           code: "2",
-          type: "Summary",
+          type: "Summary" as const,  // Use const assertion to fix type error
           budgetedCost: 0,
-          startDate: new Date(project.startDate),
-          endDate: new Date(project.endDate),
-          duration: Math.ceil((new Date(project.endDate).getTime() - new Date(project.startDate).getTime()) / (1000 * 60 * 60 * 24)),
           isTopLevel: true,
           description: "Procurement and construction phase"
         },
@@ -91,11 +86,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: "Testing & Commissioning",
           level: 1,
           code: "3",
-          type: "Summary",
+          type: "Summary" as const,  // Use const assertion to fix type error
           budgetedCost: 0,
-          startDate: new Date(project.startDate),
-          endDate: new Date(project.endDate),
-          duration: Math.ceil((new Date(project.endDate).getTime() - new Date(project.startDate).getTime()) / (1000 * 60 * 60 * 24)),
           isTopLevel: true,
           description: "Testing and commissioning phase"
         }
@@ -123,7 +115,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Project not found" });
       }
 
-      const projectData = insertProjectSchema.partial().parse(req.body);
+      // Create a partial schema for the project update
+      const partialProjectSchema = z.object({
+        name: z.string().optional(),
+        description: z.string().nullable().optional(),
+        budget: z.number().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional()
+      });
+
+      const projectData = partialProjectSchema.parse(req.body);
       const updatedProject = await storage.updateProject(id, projectData);
       
       res.json(updatedProject);
@@ -199,11 +200,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Project not found" });
       }
 
-      // If it has a parent, validate it exists
+      // Apply additional business rules for WBS hierarchy
+      
+      // Rule 1: Top-level items must be Summary
+      if (!wbsItemData.parentId && wbsItemData.type !== "Summary") {
+        return res.status(400).json({ 
+          message: "Top-level WBS items must be of type 'Summary'"
+        });
+      }
+
+      // Rule 2: If parent exists, validate parent-child type relationships
       if (wbsItemData.parentId) {
         const parentWbsItem = await storage.getWbsItem(wbsItemData.parentId);
         if (!parentWbsItem) {
           return res.status(404).json({ message: "Parent WBS item not found" });
+        }
+
+        // Rule 2a: If parent is Summary, child can be either WorkPackage or Summary
+        if (parentWbsItem.type === "Summary") {
+          if (wbsItemData.type === "Activity") {
+            return res.status(400).json({
+              message: "A 'Summary' WBS item cannot have an 'Activity' as a direct child. It must have a 'WorkPackage' in between."
+            });
+          }
+        }
+        // Rule 2b: If parent is WorkPackage, child can only be Activity
+        else if (parentWbsItem.type === "WorkPackage") {
+          if (wbsItemData.type !== "Activity") {
+            return res.status(400).json({
+              message: "A 'WorkPackage' can only have 'Activity' items as children"
+            });
+          }
+        }
+        // Rule 2c: Activity cannot have children
+        else if (parentWbsItem.type === "Activity") {
+          return res.status(400).json({
+            message: "An 'Activity' item cannot have children"
+          });
+        }
+
+        // Rule 3: Check if creating a WorkPackage under a non-top-level Summary
+        if (wbsItemData.type === "WorkPackage" && parentWbsItem.type === "Summary" && !parentWbsItem.isTopLevel) {
+          // Check if there's already a WorkPackage in the hierarchy between top level and this item
+          const projectWbsItems = await storage.getWbsItems(wbsItemData.projectId);
+          const hasWorkPackageInPath = checkForWorkPackageInPath(projectWbsItems, parentWbsItem);
+          
+          if (hasWorkPackageInPath) {
+            return res.status(400).json({
+              message: "Cannot create a 'WorkPackage' at this level. Only one level of 'WorkPackage' is allowed in the hierarchy."
+            });
+          }
         }
       }
 
@@ -226,7 +272,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "WBS item not found" });
       }
 
-      const wbsItemData = insertWbsItemSchema.partial().parse(req.body);
+      // Use z.object to create a partial schema for validation
+      const partialWbsSchema = z.object({
+        projectId: z.number().optional(),
+        parentId: z.number().nullable().optional(),
+        name: z.string().optional(),
+        description: z.string().nullable().optional(),
+        level: z.number().optional(),
+        code: z.string().optional(),
+        type: z.enum(["Summary", "WorkPackage", "Activity"]).optional(),
+        budgetedCost: z.number().optional(),
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+        duration: z.number().optional(),
+        isTopLevel: z.boolean().optional(),
+      });
+      
+      const wbsItemData = partialWbsSchema.parse(req.body);
+      
+      // If changing type, apply the same business rules
+      if (wbsItemData.type && wbsItemData.type !== wbsItem.type) {
+        // Top-level items must be Summary
+        if (wbsItem.isTopLevel && wbsItemData.type !== "Summary") {
+          return res.status(400).json({ 
+            message: "Top-level WBS items must be of type 'Summary'"
+          });
+        }
+
+        // Check parent-child type relationships if changing type
+        if (wbsItem.parentId) {
+          const parentWbsItem = await storage.getWbsItem(wbsItem.parentId);
+          if (!parentWbsItem) {
+            return res.status(404).json({ message: "Parent WBS item not found" });
+          }
+
+          // Apply same rules as in the POST endpoint
+          if (parentWbsItem.type === "Summary") {
+            if (wbsItemData.type === "Activity") {
+              return res.status(400).json({
+                message: "A 'Summary' WBS item cannot have an 'Activity' as a direct child. It must have a 'WorkPackage' in between."
+              });
+            }
+          } else if (parentWbsItem.type === "WorkPackage") {
+            if (wbsItemData.type !== "Activity") {
+              return res.status(400).json({
+                message: "A 'WorkPackage' can only have 'Activity' items as children"
+              });
+            }
+          }
+        }
+
+        // Check for children compatibility with new type
+        const projectWbsItems = await storage.getWbsItems(wbsItem.projectId);
+        const children = projectWbsItems.filter(item => item.parentId === wbsItem.id);
+        
+        if (children.length > 0) {
+          if (wbsItemData.type === "Activity") {
+            return res.status(400).json({
+              message: "Cannot change to 'Activity' type because this item has children. 'Activity' items cannot have children."
+            });
+          }
+
+          if (wbsItemData.type === "WorkPackage") {
+            const hasNonActivityChildren = children.some(child => child.type !== "Activity");
+            if (hasNonActivityChildren) {
+              return res.status(400).json({
+                message: "Cannot change to 'WorkPackage' type because this item has non-Activity children. 'WorkPackage' items can only have 'Activity' children."
+              });
+            }
+          }
+        }
+      }
+
       const updatedWbsItem = await storage.updateWbsItem(id, wbsItemData);
       
       res.json(updatedWbsItem);
@@ -245,6 +362,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const wbsItem = await storage.getWbsItem(id);
       if (!wbsItem) {
         return res.status(404).json({ message: "WBS item not found" });
+      }
+
+      // Only Activity items should have progress updated with dates
+      if (wbsItem.type !== "Activity" && (req.body.actualStartDate || req.body.actualEndDate)) {
+        return res.status(400).json({
+          message: "Only 'Activity' items can have actual start and end dates"
+        });
       }
 
       const progressData = updateWbsProgressSchema.parse({ id, ...req.body });
@@ -315,6 +439,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Successor WBS item not found" });
       }
 
+      // Only Activity items should have dependencies
+      if (predecessor.type !== "Activity" || successor.type !== "Activity") {
+        return res.status(400).json({ 
+          message: "Dependencies can only be created between 'Activity' items" 
+        });
+      }
+
       const dependency = await storage.createDependency(dependencyData);
       res.status(201).json(dependency);
     } catch (err) {
@@ -363,6 +494,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "WBS item not found" });
       }
 
+      // Only WorkPackage items can have cost entries
+      if (wbsItem.type !== "WorkPackage" && wbsItem.type !== "Summary") {
+        return res.status(400).json({ 
+          message: "Cost entries can only be added to 'WorkPackage' or 'Summary' items" 
+        });
+      }
+
       const costEntry = await storage.createCostEntry(costEntryData);
       res.status(201).json(costEntry);
     } catch (err) {
@@ -386,7 +524,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const wbsItemsByCode = new Map(wbsItems.map(item => [item.code, item]));
       
       // Transform validated data to cost entries
-      const costEntries = [];
+      const costEntries: Array<{
+        wbsItemId: number;
+        amount: string;
+        description: string;
+        entryDate: string;
+      }> = [];
       const errors = [];
 
       for (let i = 0; i < validatedData.length; i++) {
@@ -398,11 +541,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           continue;
         }
 
+        // Check if WBS item is of a type that can accept costs
+        if (wbsItem.type !== "WorkPackage" && wbsItem.type !== "Summary") {
+          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' is of type '${wbsItem.type}', which cannot have cost entries`);
+          continue;
+        }
+
         costEntries.push({
           wbsItemId: wbsItem.id,
-          amount: row.amount,
+          amount: row.amount.toString(),
           description: row.description || "",
-          entryDate: row.entryDate
+          entryDate: row.entryDate.toISOString()
         });
       }
 
@@ -435,4 +584,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   return httpServer;
+}
+
+// Helper function to check if there's a WorkPackage in the parent path of a WBS item
+function checkForWorkPackageInPath(wbsItems: any[], item: any): boolean {
+  if (!item.parentId) return false;
+  
+  const parent = wbsItems.find(wbs => wbs.id === item.parentId);
+  if (!parent) return false;
+  
+  if (parent.type === "WorkPackage") return true;
+  
+  return checkForWorkPackageInPath(wbsItems, parent);
 }

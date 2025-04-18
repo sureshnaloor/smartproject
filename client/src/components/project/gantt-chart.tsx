@@ -54,7 +54,10 @@ export function GanttChart({ projectId }: GanttChartProps) {
   const fetchDependenciesForItems = async () => {
     const allDependencies: Dependency[] = [];
     
-    for (const item of wbsItems) {
+    // Only Activity items can have dependencies
+    const activityItems = wbsItems.filter(item => item.type === "Activity");
+    
+    for (const item of activityItems) {
       const response = await fetch(`/api/wbs/${item.id}/dependencies`, {
         credentials: "include",
       });
@@ -73,9 +76,14 @@ export function GanttChart({ projectId }: GanttChartProps) {
     enabled: wbsItems.length > 0,
   });
 
-  // Calculate project timeline
+  // Calculate project timeline based only on Activity items
   const { startDate, endDate, totalDays } = useMemo(() => {
-    if (wbsItems.length === 0) {
+    // Filter to only Activity items with dates
+    const activitiesWithDates = wbsItems.filter(
+      item => item.type === "Activity" && item.startDate && item.endDate
+    );
+    
+    if (activitiesWithDates.length === 0) {
       const today = new Date();
       const sixMonthsLater = new Date(today);
       sixMonthsLater.setMonth(today.getMonth() + 6);
@@ -87,10 +95,12 @@ export function GanttChart({ projectId }: GanttChartProps) {
       };
     }
     
-    let minDate = new Date(wbsItems[0].startDate);
-    let maxDate = new Date(wbsItems[0].endDate);
+    let minDate = new Date(activitiesWithDates[0].startDate as string);
+    let maxDate = new Date(activitiesWithDates[0].endDate as string);
     
-    wbsItems.forEach(item => {
+    activitiesWithDates.forEach(item => {
+      if (!item.startDate || !item.endDate) return;
+      
       const itemStartDate = new Date(item.startDate);
       const itemEndDate = new Date(item.endDate);
       
@@ -235,8 +245,24 @@ export function GanttChart({ projectId }: GanttChartProps) {
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-        <h3 className="text-base font-semibold">Project Schedule</h3>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center">
+          <h3 className="text-base font-semibold">Project Schedule</h3>
+          <div className="ml-4">
+            <Select
+              value={timeScale}
+              onValueChange={(value: "weeks" | "months") => setTimeScale(value)}
+            >
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Time scale" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="weeks">Weeks</SelectItem>
+                <SelectItem value="months">Months</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="flex space-x-2">
           <Button 
             variant="outline" 
             size="sm"
@@ -253,51 +279,53 @@ export function GanttChart({ projectId }: GanttChartProps) {
             <ChevronRight className="h-4 w-4 mr-1.5" />
             Collapse All
           </Button>
-          <Select
-            value={timeScale}
-            onValueChange={(value: "weeks" | "months") => setTimeScale(value)}
-          >
-            <SelectTrigger className="w-[120px] h-9">
-              <Calendar className="h-4 w-4 mr-1.5" />
-              <SelectValue placeholder="View" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="weeks">Weekly View</SelectItem>
-              <SelectItem value="months">Monthly View</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <div className="min-w-max">
-          {/* Timeline Header */}
-          <div className="flex border-b border-gray-200">
-            <div className="w-64 flex-shrink-0 px-4 py-2 bg-gray-50 border-r border-gray-200 font-medium text-sm">
-              Work Breakdown Structure
-            </div>
-            <div className="flex-grow">
-              <div className="grid" style={{ gridTemplateColumns: `repeat(${timeScaleHeaders.length}, minmax(90px, 1fr))` }}>
-                {timeScaleHeaders.map((header, idx) => (
-                  <div key={idx} className="px-2 py-2 text-center text-xs font-medium border-r border-gray-200">
+      {isLoadingWbs || isLoadingDeps ? (
+        <div className="space-y-4 p-4">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[800px]">
+            <div className="grid grid-cols-[250px_1fr] border-b border-gray-200">
+              <div className="py-2 px-4 font-medium text-sm bg-gray-50">
+                WBS Item
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: `repeat(${timeScaleHeaders.length}, 1fr)` }}>
+                {timeScaleHeaders.map((header, index) => (
+                  <div 
+                    key={index} 
+                    className="py-2 px-1 font-medium text-xs text-center bg-gray-50"
+                  >
                     {header}
                   </div>
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* WBS Rows with Gantt bars */}
-          <div>
-            {hierarchicalItems.length === 0 ? (
-              <div className="px-4 py-6 text-center text-gray-500">
-                No WBS items found. Add items to see the schedule.
-              </div>
-            ) : (
-              renderWbsItems(hierarchicalItems)
-            )}
+            
+            <div>
+              {hierarchicalItems.length === 0 ? (
+                <div className="px-4 py-3 text-center text-gray-500">
+                  No scheduled items found.
+                </div>
+              ) : (
+                renderWbsItems(hierarchicalItems)
+              )}
+            </div>
           </div>
         </div>
+      )}
+      
+      <div className="p-3 bg-blue-50 rounded-md text-sm text-blue-700 m-4">
+        <p className="font-medium mb-1">Note:</p>
+        <p>
+          In the current WBS structure, only Activity items have schedules. 
+          Summary and WorkPackage items are used for budget organization and do not have dates.
+        </p>
       </div>
     </div>
   );
@@ -311,53 +339,59 @@ function GanttItem({
   isExpanded,
   onToggleExpand
 }: GanttItemProps) {
-  // Calculate position for the gantt bar
+  const hasChildren = item.children && item.children.length > 0;
+
+  // Calculate position and width for the activity bar
   const calculatePosition = () => {
+    // Only Activity items have dates and should be displayed on the timeline
+    if (item.type !== "Activity" || !item.startDate || !item.endDate) {
+      return {
+        left: 0,
+        width: 0,
+        display: "none"
+      };
+    }
+    
     const itemStartDate = new Date(item.startDate);
     const itemEndDate = new Date(item.endDate);
     
-    const startDiff = Math.max(0, (itemStartDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-    const duration = Math.max(1, (itemEndDate.getTime() - itemStartDate.getTime()) / (1000 * 60 * 60 * 24) + 1);
+    const diffStartTime = Math.abs(itemStartDate.getTime() - startDate.getTime());
+    const diffStartDays = Math.ceil(diffStartTime / (1000 * 60 * 60 * 24));
     
-    const left = (startDiff / totalDays) * 100;
-    const width = (duration / totalDays) * 100;
+    const diffDuration = Math.abs(itemEndDate.getTime() - itemStartDate.getTime());
+    const durationDays = Math.ceil(diffDuration / (1000 * 60 * 60 * 24)) + 1; // Include end day
+    
+    const left = (diffStartDays / totalDays) * 100;
+    const width = (durationDays / totalDays) * 100;
     
     return {
       left: `${left}%`,
       width: `${width}%`,
+      display: "block"
     };
   };
 
-  // Get color based on item type
   const getBarColor = () => {
-    if (item.isTopLevel) {
-      if (item.code === "1") return "bg-blue-500"; // Engineering & Design
-      if (item.code === "2") return "bg-primary-500"; // Procurement & Construction
-      if (item.code === "3") return "bg-gray-400"; // Testing & Commissioning
-    }
+    if (item.type !== "Activity") return "";
     
-    if (item.type === "Summary") return "bg-blue-400";
-    if (item.type === "Activity") return "bg-primary-400";
-    return "bg-amber-400"; // Task
+    const progress = Number(item.percentComplete);
+    
+    if (progress >= 100) return "bg-green-500";
+    if (progress > 0) return "bg-blue-500";
+    return "bg-gray-400";
   };
 
-  const barPosition = calculatePosition();
-  const barColor = getBarColor();
-  const paddingLeft = `${level * 1.5}rem`;
-
+  const paddingLeft = `${level * 16 + 4}px`;
+  
   return (
-    <div className="flex border-b border-gray-200 hover:bg-gray-50 transition-colors">
-      <div 
-        className="w-64 flex-shrink-0 px-4 py-3 border-r border-gray-200"
-      >
-        <div 
-          className="flex items-center" 
-          style={{ paddingLeft }}
-        >
-          {item.children && item.children.length > 0 ? (
-            <button 
+    <>
+      <div className="grid grid-cols-[250px_1fr] border-b border-gray-100">
+        <div className="py-2 px-2 flex items-center" style={{ paddingLeft }}>
+          {hasChildren ? (
+            <button
+              type="button"
               onClick={() => onToggleExpand(item.id)}
-              className="mr-2 text-gray-500 p-1 hover:bg-gray-200 rounded-sm"
+              className="mr-1 text-gray-500"
             >
               {isExpanded ? (
                 <ChevronDown className="h-4 w-4" />
@@ -366,55 +400,56 @@ function GanttItem({
               )}
             </button>
           ) : (
-            <div className="w-6 mr-2"></div>
+            <span className="w-5"></span>
           )}
-          <div className="text-sm truncate">
-            <span className={`${item.isTopLevel ? 'font-medium' : ''}`}>
-              {item.name}
-            </span>
-            {(item.actualStartDate || item.percentComplete > 0) && (
-              <span className={`ml-2 text-xs ${
-                Number(item.percentComplete) === 100 
-                  ? 'text-green-600' 
-                  : Number(item.percentComplete) > 0 
-                    ? 'text-blue-600' 
-                    : 'text-gray-500'
-              }`}>
-                ({item.percentComplete}%)
-              </span>
+          <div className="ml-1">
+            <div className="text-sm font-medium">{item.name}</div>
+            {item.type === "Activity" && item.startDate && item.endDate && (
+              <div className="text-xs text-gray-500">
+                {formatShortDate(item.startDate)} - {formatShortDate(item.endDate)}
+              </div>
             )}
           </div>
         </div>
-      </div>
-      <div className="flex-grow relative h-10">
-        <div 
-          className={`absolute h-5 top-2.5 rounded ${barColor}`} 
-          style={{ 
-            left: barPosition.left, 
-            width: barPosition.width,
-            opacity: 0.8
-          }}
-          title={`${item.name}: ${formatShortDate(item.startDate)} - ${formatShortDate(item.endDate)}`}
-        >
-          {barPosition.width > 8 && (
-            <div className="text-xs text-white truncate px-1.5 leading-5">
-              {item.name} ({item.duration}d)
+        <div className="relative h-8 py-1 flex">
+          {item.type === "Activity" && (
+            <div 
+              className={`absolute h-6 ${getBarColor()} rounded-sm opacity-90`}
+              style={calculatePosition()}
+            >
+              <div 
+                className="absolute inset-0 flex items-center justify-center text-xs text-white font-medium"
+                style={{ padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              >
+                {formatPercent(item.percentComplete)}
+              </div>
+            </div>
+          )}
+          {item.type !== "Activity" && (
+            <div className="absolute inset-0 flex items-center px-4">
+              <span className="text-xs text-gray-400">
+                {item.type === "Summary" ? "Summary Item" : "Work Package"}
+              </span>
             </div>
           )}
         </div>
-        
-        {/* Progress bar overlay */}
-        {Number(item.percentComplete) > 0 && (
-          <div 
-            className="absolute h-5 top-2.5 rounded bg-green-600 bg-opacity-70" 
-            style={{ 
-              left: barPosition.left, 
-              width: `calc(${barPosition.width} * ${Number(item.percentComplete) / 100})`,
-              opacity: 0.8
-            }}
-          />
-        )}
       </div>
-    </div>
+      
+      {isExpanded && hasChildren && (
+        <>
+          {item.children.map(child => (
+            <GanttItem
+              key={child.id}
+              item={child}
+              startDate={startDate}
+              totalDays={totalDays}
+              level={level + 1}
+              isExpanded={!!expandedItems[child.id]}
+              onToggleExpand={onToggleExpand}
+            />
+          ))}
+        </>
+      )}
+    </>
   );
 }

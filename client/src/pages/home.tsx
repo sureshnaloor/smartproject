@@ -3,9 +3,10 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Project } from "@shared/schema";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Building, Clock, DollarSign, ArrowRight, Plus } from "lucide-react";
+import { Building, Clock, DollarSign, ArrowRight, Plus, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddProjectModal } from "@/components/project/add-project-modal";
+import { DeleteProjectDialog } from "@/components/project/delete-project-dialog";
 import {
   Card,
   CardContent,
@@ -15,6 +16,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -105,11 +112,35 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map((project) => (
               <Card key={project.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle>{project.name}</CardTitle>
-                  <CardDescription>
-                    {project.description || "No description provided"}
-                  </CardDescription>
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <CardTitle>{project.name}</CardTitle>
+                      <CardDescription>
+                        {project.description || "No description provided"}
+                      </CardDescription>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                          <span className="sr-only">Open menu</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="text-red-500 focus:text-red-500"
+                          onSelect={(e) => e.preventDefault()}
+                        >
+                          <DeleteProjectDialog
+                            projectId={project.id}
+                            projectName={project.name}
+                            trigger={<div className="flex items-center w-full">Delete project</div>}
+                          />
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
