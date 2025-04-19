@@ -5,7 +5,7 @@ import { Project, WbsItem } from "@shared/schema";
 import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils";
 import { FileSpreadsheet, ChartLine, GanttChart, Menu, MoreHorizontal, BarChart2, PencilIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ImportCostsModal } from "./import-costs-modal";
+import { ImportWbsModal } from "./import-wbs-modal";
 import { DeleteProjectDialog } from "./delete-project-dialog";
 import { EditProjectModal } from "./edit-project-modal";
 import { useMobile } from "@/hooks/use-mobile";
@@ -110,7 +110,7 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
             onClick={() => setIsImportModalOpen(true)}
           >
             <FileSpreadsheet className="mr-1.5 h-4 w-4" />
-            Import Data
+            Import WBS Data
           </Button>
           <Button size="sm">
             <ChartLine className="mr-1.5 h-4 w-4" />
@@ -210,7 +210,7 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
         </nav>
       </div>
 
-      <ImportCostsModal
+      <ImportWbsModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         projectId={projectId}

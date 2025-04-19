@@ -29,7 +29,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileUp, FileX, Download } from "lucide-react";
+import { FileUp, FileX, Download, AlertTriangle } from "lucide-react";
 import { 
   Table,
   TableBody,
@@ -38,11 +38,10 @@ import {
   TableHeader,
   TableRow 
 } from "@/components/ui/table";
-import { DataTable } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-interface ImportCostsModalProps {
+interface ImportWbsModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId: number;
@@ -58,7 +57,7 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
-export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModalProps) {
+export function ImportWbsModal({ isOpen, onClose, projectId }: ImportWbsModalProps) {
   const [csvData, setCsvData] = useState<any[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [isParsingComplete, setIsParsingComplete] = useState(false);
@@ -112,30 +111,54 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
     }
   };
 
-  // Import costs mutation
-  const importCosts = useMutation({
+  // Import WBS items mutation
+  const importWbsItems = useMutation({
     mutationFn: async (data: any[]) => {
-      const response = await apiRequest("POST", "/api/costs/import", {
-        projectId,
-        csvData: data,
-      });
-      return response.json();
+      try {
+        const response = await apiRequest("POST", "/api/wbs/import", {
+          projectId,
+          csvData: data,
+        });
+        return response.json();
+      } catch (error) {
+        console.error("CSV import error:", error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/wbs`] });
       toast({
         title: "Import Successful",
-        description: `${csvData.length} cost entries have been imported.`,
+        description: `${csvData.length} WBS items have been imported.`,
         variant: "default",
       });
       handleClose();
     },
-    onError: (error) => {
+    onError: (error: any) => {
+      console.error("Import error details:", error);
+      
+      let errorMessage = "Failed to import WBS items. Please check your CSV file.";
+      let errorDetails: string[] = [];
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      if (error.errors && Array.isArray(error.errors)) {
+        errorMessage = `${error.errors.length} validation errors found. Please check your CSV file.`;
+        errorDetails = error.errors;
+      }
+      
       toast({
         title: "Import Failed",
-        description: error.message || "Failed to import cost entries. Please check your CSV file.",
+        description: errorMessage,
         variant: "destructive",
       });
+      
+      if (errorDetails.length > 0) {
+        setParseErrors(errorDetails);
+        setIsParsingComplete(true);
+      }
     },
   });
 
@@ -159,7 +182,7 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
       return;
     }
     
-    importCosts.mutate(csvData);
+    importWbsItems.mutate(csvData);
   };
 
   // Handle modal close
@@ -180,11 +203,27 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Import Cost Data</DialogTitle>
+          <DialogTitle>Import WBS Items</DialogTitle>
           <DialogDescription>
-            Upload a CSV file with cost entries. Download the template to see the required format.
+            Upload a CSV file with WBS items. Download the template to see the required format.
           </DialogDescription>
         </DialogHeader>
+
+        <Alert className="mb-4">
+          <AlertDescription>
+            <p className="mb-1 font-semibold">Import Requirements:</p>
+            <ul className="list-disc pl-5 text-sm space-y-1">
+              <li><strong>Required fields:</strong> wbsCode, wbsName, wbsType</li>
+              <li><strong>WBS Type rules:</strong></li>
+              <ul className="list-disc pl-5 text-xs space-y-1 mt-1">
+                <li><strong>Summary/WorkPackage:</strong> Must have budget amount, cannot have dates</li>
+                <li><strong>Activity:</strong> Must have dates (start/end or duration), cannot have budget</li>
+              </ul>
+              <li>Existing WBS items with matching codes will be updated</li>
+              <li>Date format must be YYYY-MM-DD</li>
+            </ul>
+          </AlertDescription>
+        </Alert>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -225,7 +264,7 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
                       </div>
                     </FormControl>
                     <FormDescription>
-                      Upload a CSV file with columns: wbsCode, amount, description (optional), entryDate
+                      Upload a CSV file with the required columns: wbsCode, wbsName, wbsType, and other properties
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -243,6 +282,16 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
               </Button>
             </div>
 
+            <Alert className="mb-4 border-yellow-300 bg-yellow-50">
+              <AlertDescription className="flex">
+                <AlertTriangle className="h-5 w-5 mr-2 text-amber-600 flex-shrink-0" />
+                <p className="text-sm">
+                  <strong>Important:</strong> The template includes example WBS items with different types. 
+                  Make sure to follow the validation rules for each type.
+                </p>
+              </AlertDescription>
+            </Alert>
+
             {parseErrors.length > 0 && (
               <Alert variant="destructive">
                 <AlertDescription>
@@ -258,29 +307,39 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
 
             {isParsingComplete && csvData.length > 0 && (
               <div>
-                <h4 className="text-sm font-medium mb-2">Preview ({csvData.length} entries)</h4>
+                <h4 className="text-sm font-medium mb-2">Preview ({csvData.length} items)</h4>
                 <div className="border rounded-md overflow-hidden max-h-[300px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>WBS Code</TableHead>
-                        <TableHead>WBS Item</TableHead>
+                        <TableHead>Code</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Type</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Date</TableHead>
+                        <TableHead>Start Date</TableHead>
+                        <TableHead>End Date</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {csvData.map((row, index) => {
-                        const wbsItem = wbsItems.find(item => item.code === row.wbsCode);
+                        // Check if this code already exists
+                        const existingItem = wbsItems.find(item => item.code === row.wbsCode);
                         
                         return (
                           <TableRow key={index}>
-                            <TableCell>{row.wbsCode}</TableCell>
-                            <TableCell>{wbsItem ? wbsItem.name : <Badge variant="destructive">Not Found</Badge>}</TableCell>
-                            <TableCell className="text-right font-mono">${parseFloat(row.amount).toFixed(2)}</TableCell>
-                            <TableCell>{row.description || "-"}</TableCell>
-                            <TableCell>{new Date(row.entryDate).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              {row.wbsCode}
+                              {existingItem && (
+                                <Badge variant="outline" className="ml-2 text-xs">Exists</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>{row.wbsName}</TableCell>
+                            <TableCell>{row.wbsType}</TableCell>
+                            <TableCell className="text-right font-mono">
+                              {row.amount ? `$${parseFloat(row.amount).toFixed(2)}` : '-'}
+                            </TableCell>
+                            <TableCell>{row.startDate || '-'}</TableCell>
+                            <TableCell>{row.endDate || '-'}</TableCell>
                           </TableRow>
                         );
                       })}
@@ -300,9 +359,9 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
               </Button>
               <Button 
                 type="submit"
-                disabled={importCosts.isPending || csvData.length === 0 || parseErrors.length > 0}
+                disabled={importWbsItems.isPending || csvData.length === 0 || parseErrors.length > 0}
               >
-                {importCosts.isPending ? (
+                {importWbsItems.isPending ? (
                   <>
                     <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -313,7 +372,7 @@ export function ImportCostsModal({ isOpen, onClose, projectId }: ImportCostsModa
                 ) : (
                   <>
                     <FileUp className="mr-2 h-4 w-4" />
-                    Import Cost Data
+                    Import WBS Items
                   </>
                 )}
               </Button>

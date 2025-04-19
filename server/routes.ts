@@ -644,55 +644,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid request body" });
       }
 
-      // Validate the CSV data
-      const validatedData = csvImportSchema.parse(csvData);
-      
-      // Get all WBS items for the project to map codes to IDs
-      const wbsItems = await storage.getWbsItems(projectId);
-      const wbsItemsByCode = new Map(wbsItems.map(item => [item.code, item]));
-      
-      // Transform validated data to cost entries
-      const costEntries: Array<{
-        wbsItemId: number;
-        amount: string;
-        description: string;
-        entryDate: string;
-      }> = [];
-      const errors = [];
+      // Check if project exists
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
 
-      for (let i = 0; i < validatedData.length; i++) {
-        const row = validatedData[i];
-        const wbsItem = wbsItemsByCode.get(row.wbsCode);
+      try {
+        // Validate the CSV data
+        const validatedData = csvImportSchema.parse(csvData);
         
-        if (!wbsItem) {
-          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' not found`);
-          continue;
+        // Get all WBS items for the project to map codes to IDs
+        const wbsItems = await storage.getWbsItems(projectId);
+        const wbsItemsByCode = new Map(wbsItems.map(item => [item.code, item]));
+        
+        // Transform validated data to cost entries
+        const costEntries: Array<{
+          wbsItemId: number;
+          amount: string;
+          description: string;
+          entryDate: string;
+        }> = [];
+        const errors = [];
+
+        for (let i = 0; i < validatedData.length; i++) {
+          const row = validatedData[i];
+          const wbsItem = wbsItemsByCode.get(row.wbsCode);
+          
+          if (!wbsItem) {
+            errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' not found`);
+            continue;
+          }
+
+          // Check if WBS item is of a type that can accept costs
+          if (wbsItem.type !== "WorkPackage" && wbsItem.type !== "Summary") {
+            errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' is of type '${wbsItem.type}'. Cost entries can only be added to 'Summary' or 'WorkPackage' types. 'Activity' type items cannot have costs.`);
+            continue;
+          }
+
+          costEntries.push({
+            wbsItemId: wbsItem.id,
+            amount: row.amount.toString(),
+            description: row.description || "",
+            entryDate: row.entryDate.toISOString()
+          });
         }
 
-        // Check if WBS item is of a type that can accept costs
-        if (wbsItem.type !== "WorkPackage" && wbsItem.type !== "Summary") {
-          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' is of type '${wbsItem.type}', which cannot have cost entries`);
-          continue;
+        if (errors.length > 0) {
+          return res.status(400).json({ 
+            message: "Validation errors in CSV data", 
+            errors 
+          });
         }
 
-        costEntries.push({
-          wbsItemId: wbsItem.id,
-          amount: row.amount.toString(),
-          description: row.description || "",
-          entryDate: row.entryDate.toISOString()
-        });
-      }
+        if (costEntries.length === 0) {
+          return res.status(400).json({ message: "No valid cost entries found in the CSV data" });
+        }
 
-      if (errors.length > 0) {
+        const createdEntries = await storage.createCostEntries(costEntries);
+        return res.status(201).json(createdEntries);
+      } catch (validationError) {
+        console.error("CSV validation error:", validationError);
         return res.status(400).json({ 
-          message: "Validation errors in CSV data", 
-          errors 
+          message: "Invalid CSV data format",
+          error: validationError instanceof Error ? validationError.message : "Unknown validation error" 
         });
       }
-
-      const createdEntries = await storage.createCostEntries(costEntries);
-      res.status(201).json(createdEntries);
     } catch (err) {
+      console.error("Error importing costs:", err);
       handleError(err, res);
     }
   });
@@ -707,6 +726,218 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteCostEntry(id);
       res.status(204).end();
     } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.post("/api/wbs/import", async (req: Request, res: Response) => {
+    try {
+      const { projectId, csvData } = req.body;
+      
+      if (!projectId || !csvData || !Array.isArray(csvData)) {
+        return res.status(400).json({ message: "Invalid request body" });
+      }
+
+      // Check if project exists
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      // Get all existing WBS items for the project
+      const existingWbsItems = await storage.getWbsItems(projectId);
+      
+      // Create a mapping of WBS codes to WBS items for easy lookup
+      const wbsItemsByCode = new Map(existingWbsItems.map(item => [item.code, item]));
+      
+      // Track any validation errors
+      const errors = [];
+      const results = [];
+
+      // Process each WBS item in the CSV data
+      for (let i = 0; i < csvData.length; i++) {
+        const row = csvData[i];
+        
+        // Skip invalid rows
+        if (!row.wbsCode || !row.wbsName || !row.wbsType) {
+          errors.push(`Row ${i + 1}: Missing required fields (wbsCode, wbsName, wbsType)`);
+          continue;
+        }
+        
+        // Validate WBS type
+        if (!["Summary", "WorkPackage", "Activity"].includes(row.wbsType)) {
+          errors.push(`Row ${i + 1}: Invalid WBS type '${row.wbsType}' - must be Summary, WorkPackage, or Activity`);
+          continue;
+        }
+        
+        // Parse level and parent from the WBS code
+        const codeParts = row.wbsCode.split('.');
+        const level = codeParts.length;
+        let parentCode = null;
+        let parentId = null;
+        
+        if (level > 1) {
+          // If not top level, get parent code by removing the last part
+          parentCode = codeParts.slice(0, -1).join('.');
+          const parentItem = wbsItemsByCode.get(parentCode);
+          
+          if (!parentItem) {
+            errors.push(`Row ${i + 1}: Parent WBS item with code '${parentCode}' not found`);
+            continue;
+          }
+          
+          parentId = parentItem.id;
+          
+          // Parent-child type validation
+          if (parentItem.type === "Summary" && row.wbsType === "Activity") {
+            errors.push(`Row ${i + 1}: 'Summary' parent cannot have 'Activity' as a direct child`);
+            continue;
+          } else if (parentItem.type === "WorkPackage" && row.wbsType !== "Activity") {
+            errors.push(`Row ${i + 1}: 'WorkPackage' parent can only have 'Activity' children`);
+            continue;
+          } else if (parentItem.type === "Activity") {
+            errors.push(`Row ${i + 1}: 'Activity' items cannot have children`);
+            continue;
+          }
+        }
+        
+        // Type-specific validations
+        if (row.wbsType === "Summary" || row.wbsType === "WorkPackage") {
+          // Validate budget (required for these types)
+          if (!row.amount || isNaN(Number(row.amount)) || Number(row.amount) <= 0) {
+            errors.push(`Row ${i + 1}: ${row.wbsType} type must have a positive budget amount`);
+            continue;
+          }
+          
+          // Summary and WorkPackage should not have dates
+          if (row.startDate || row.endDate || row.duration) {
+            errors.push(`Row ${i + 1}: ${row.wbsType} type cannot have dates (startDate, endDate, or duration)`);
+            continue;
+          }
+        } else if (row.wbsType === "Activity") {
+          // Validate dates for Activity items
+          if ((!row.startDate && !row.endDate) || (!row.startDate && !row.duration)) {
+            errors.push(`Row ${i + 1}: Activity type must have startDate and either endDate or duration`);
+            continue;
+          }
+          
+          // Parse dates if provided
+          let startDate = null;
+          let endDate = null;
+          let duration = null;
+          
+          if (row.startDate) {
+            try {
+              startDate = new Date(row.startDate);
+              if (isNaN(startDate.getTime())) {
+                errors.push(`Row ${i + 1}: Invalid startDate format`);
+                continue;
+              }
+            } catch (e) {
+              errors.push(`Row ${i + 1}: Invalid startDate format`);
+              continue;
+            }
+          }
+          
+          if (row.endDate) {
+            try {
+              endDate = new Date(row.endDate);
+              if (isNaN(endDate.getTime())) {
+                errors.push(`Row ${i + 1}: Invalid endDate format`);
+                continue;
+              }
+            } catch (e) {
+              errors.push(`Row ${i + 1}: Invalid endDate format`);
+              continue;
+            }
+          }
+          
+          if (row.duration) {
+            duration = Number(row.duration);
+            if (isNaN(duration) || duration <= 0) {
+              errors.push(`Row ${i + 1}: Duration must be a positive number`);
+              continue;
+            }
+          }
+          
+          // Calculate missing values
+          if (startDate && endDate && !duration) {
+            // Calculate duration from start and end dates
+            const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+            duration = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          } else if (startDate && duration && !endDate) {
+            // Calculate end date from start date and duration
+            endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + duration);
+          }
+          
+          // Ensure dates are consistent
+          if (startDate && endDate && startDate > endDate) {
+            errors.push(`Row ${i + 1}: Start date cannot be after end date`);
+            continue;
+          }
+          
+          // Activities can't have budget
+          if (row.amount && Number(row.amount) !== 0) {
+            errors.push(`Row ${i + 1}: Activity type cannot have a budget amount (must be 0 or empty)`);
+            continue;
+          }
+        }
+        
+        // Prepare WBS item data
+        const wbsItemData = {
+          projectId,
+          parentId,
+          name: row.wbsName,
+          description: row.wbsDescription || "",
+          level,
+          code: row.wbsCode,
+          type: row.wbsType,
+          budgetedCost: row.wbsType === "Activity" ? 0 : Number(row.amount),
+          startDate: row.wbsType === "Activity" && row.startDate ? new Date(row.startDate) : undefined,
+          endDate: row.wbsType === "Activity" && row.endDate ? new Date(row.endDate) : undefined,
+          duration: row.wbsType === "Activity" && row.duration ? Number(row.duration) : undefined,
+          isTopLevel: level === 1,
+        };
+        
+        try {
+          let result;
+          const existingItem = wbsItemsByCode.get(row.wbsCode);
+          
+          if (existingItem) {
+            // Update existing WBS item
+            result = await storage.updateWbsItem(existingItem.id, wbsItemData);
+            results.push({ ...result, status: "updated" });
+          } else {
+            // Create new WBS item
+            result = await storage.createWbsItem(wbsItemData);
+            results.push({ ...result, status: "created" });
+            
+            // Add to the mapping for parent-child validation of subsequent items
+            wbsItemsByCode.set(result.code, result);
+          }
+        } catch (error) {
+          errors.push(`Row ${i + 1}: Failed to process WBS item - ${error.message}`);
+        }
+      }
+      
+      // Return errors if any
+      if (errors.length > 0) {
+        return res.status(400).json({
+          message: "Some WBS items could not be imported",
+          errors,
+          results
+        });
+      }
+      
+      // Return success
+      return res.status(200).json({
+        message: "All WBS items imported successfully",
+        count: results.length,
+        results
+      });
+    } catch (err) {
+      console.error("Error importing WBS items:", err);
       handleError(err, res);
     }
   });
