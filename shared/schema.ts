@@ -170,7 +170,42 @@ export const extendedInsertProjectSchema = insertProjectSchema.extend({
 export const extendedInsertWbsItemSchema = baseWbsSchema.extend({
   name: z.string().min(3, "WBS item name must be at least 3 characters"),
   duration: z.string().or(z.number()).pipe(z.coerce.number().nonnegative()).optional(),
-});
+})
+.refine(
+  (data) => {
+    // Activity types must have startDate, endDate and duration
+    if (data.type === "Activity") {
+      return (
+        data.startDate !== undefined && 
+        data.endDate !== undefined && 
+        data.duration !== undefined && 
+        data.duration > 0
+      );
+    }
+    return true;
+  },
+  {
+    message: "Activity types must have start date, end date, and duration",
+    path: ["startDate"],
+  }
+)
+.refine(
+  (data) => {
+    // Summary and WorkPackage should not have dates
+    if (data.type === "Summary" || data.type === "WorkPackage") {
+      return (
+        data.startDate === undefined && 
+        data.endDate === undefined && 
+        data.duration === undefined
+      );
+    }
+    return true;
+  },
+  {
+    message: "Summary and WorkPackage types cannot have dates",
+    path: ["startDate"],
+  }
+);
 
 export const updateWbsProgressSchema = z.object({
   id: z.number(),

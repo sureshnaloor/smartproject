@@ -64,6 +64,13 @@ export function EditProjectModal({ projectId, isOpen, onClose, onSuccess }: Edit
 
   // Determine if currency can be edited (only if there are no WBS items yet)
   const canEditCurrency = wbsItems.length === 0;
+  
+  // Determine if budget can be edited (only if there are only the 3 default WBS items)
+  const hasOnlyDefaultWbs = wbsItems.length === 3 && 
+    wbsItems.every(item => item.isTopLevel) &&
+    wbsItems.every(item => item.parentId === null);
+  
+  const canEditBudget = hasOnlyDefaultWbs || wbsItems.length === 0;
 
   // Form definition
   const form = useForm<InsertProject>({
@@ -204,8 +211,12 @@ export function EditProjectModal({ projectId, isOpen, onClose, onSuccess }: Edit
                         {...field}
                         value={field.value}
                         onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                        disabled={!canEditBudget}
                       />
                     </FormControl>
+                    <FormDescription>
+                      {!canEditBudget && "Budget cannot be changed after custom WBS items have been added."}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

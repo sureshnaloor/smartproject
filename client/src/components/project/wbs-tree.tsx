@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { WbsItem, UpdateWbsProgress } from "@shared/schema";
+import { WbsItem, UpdateWbsProgress, Project } from "@shared/schema";
 import { formatCurrency, formatDate, formatPercent, formatShortDate, buildWbsHierarchy } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddWbsModal } from "./add-wbs-modal";
 import { EditWbsModal } from "./edit-wbs-modal";
@@ -35,6 +35,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 interface WbsTreeProps {
   projectId: number;
@@ -48,6 +56,21 @@ interface TreeItemProps {
   onRefresh: () => void;
   onUpdateProgress: (item: WbsItem) => void;
   onEdit: (item: WbsItem) => void;
+  isExpanded: boolean;
+  onToggleExpand: (id: number) => void;
+  budgetInfo: Record<number, { total: number, used: number, remaining: number }>;
+}
+
+// Interface for Project data
+interface Project {
+  id: number;
+  name: string;
+  description?: string;
+  startDate: string | Date;
+  endDate: string | Date;
+  budget: number;
+  currency: string;
+  createdAt?: string | Date;
 }
 
 export function WbsTree({ projectId }: WbsTreeProps) {
@@ -56,8 +79,14 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   const [selectedWbsItem, setSelectedWbsItem] = useState<WbsItem | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
+  const [isFinalizingBudget, setIsFinalizingBudget] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Fetch project details to get total budget
+  const { data: project } = useQuery<Project>({
+    queryKey: [`/api/projects/${projectId}`],
+  });
 
   // Fetch WBS items for the project
   const { 
@@ -68,8 +97,161 @@ export function WbsTree({ projectId }: WbsTreeProps) {
     queryKey: [`/api/projects/${projectId}/wbs`],
   });
 
+  // Calculate total project budget usage
+  const calculateProjectBudgetUsage = () => {
+    // Default values if project is undefined
+    if (!project) return { 
+      projectBudget: 0, 
+      topLevelAllocated: 0, 
+      workPackageTotal: 0, 
+      unallocated: 0, 
+      percentAllocated: 0 
+    };
+    
+    // Get all top-level summary items
+    const topLevelItems = wbsItems.filter(item => item.isTopLevel && item.type === "Summary");
+    
+    // Sum up all top-level budgets
+    const totalAllocated = topLevelItems.reduce((total, item) => {
+      return total + Number(item.budgetedCost || 0);
+    }, 0);
+    
+    // Get all work packages
+    const workPackages = wbsItems.filter(item => item.type === "WorkPackage");
+    
+    // Sum up all work package budgets
+    const totalWorkPackageBudget = workPackages.reduce((total, wp) => {
+      return total + Number(wp.budgetedCost || 0);
+    }, 0);
+    
+    const projectBudget = typeof project.budget === 'number' ? project.budget : 
+                          typeof project.budget === 'string' ? parseFloat(project.budget) : 0;
+    
+    return {
+      projectBudget,
+      topLevelAllocated: totalAllocated,
+      workPackageTotal: totalWorkPackageBudget,
+      unallocated: projectBudget - totalAllocated,
+      percentAllocated: projectBudget ? (totalAllocated / projectBudget) * 100 : 0
+    };
+  };
+  
+  const budgetUsage = project ? calculateProjectBudgetUsage() : { 
+    projectBudget: 0, 
+    topLevelAllocated: 0, 
+    workPackageTotal: 0, 
+    unallocated: 0, 
+    percentAllocated: 0 
+  };
+
   // Build WBS hierarchy
   const rootItems = buildWbsHierarchy(wbsItems);
+
+  // Calculate remaining budget for each summary item
+  const calculateBudgets = () => {
+    const budgetInfo: Record<number, { total: number, used: number, remaining: number }> = {};
+    
+    // Group items by parent
+    const itemsByParent: Record<string, WbsItem[]> = {};
+    wbsItems.forEach(item => {
+      const parentKey = item.parentId === null ? 'root' : item.parentId.toString();
+      if (!itemsByParent[parentKey]) {
+        itemsByParent[parentKey] = [];
+      }
+      itemsByParent[parentKey].push(item);
+    });
+    
+    // Process each summary item
+    wbsItems
+      .filter(item => item.type === "Summary")
+      .forEach(summaryItem => {
+        const childKey = summaryItem.id.toString();
+        const children = itemsByParent[childKey] || [];
+        const workPackageChildren = children.filter(child => child.type === "WorkPackage");
+        
+        // Calculate used budget (sum of work package budgets)
+        const usedBudget = workPackageChildren.reduce((total, wp) => {
+          return total + Number(wp.budgetedCost || 0);
+        }, 0);
+        
+        // Calculate total and remaining budgets
+        const totalBudget = Number(summaryItem.budgetedCost || 0);
+        const remainingBudget = totalBudget - usedBudget;
+        
+        budgetInfo[summaryItem.id] = {
+          total: totalBudget,
+          used: usedBudget,
+          remaining: remainingBudget
+        };
+      });
+    
+    return budgetInfo;
+  };
+  
+  const budgetInfo = calculateBudgets();
+
+  // Finalize budget mutation
+  const finalizeBudget = useMutation({
+    mutationFn: async () => {
+      setIsFinalizingBudget(true);
+      
+      // Step 1: Organize items by their hierarchy
+      const itemsByParent: Record<string, WbsItem[]> = {};
+      wbsItems.forEach(item => {
+        const parentKey = item.parentId === null ? 'root' : item.parentId.toString();
+        if (!itemsByParent[parentKey]) {
+          itemsByParent[parentKey] = [];
+        }
+        itemsByParent[parentKey].push(item);
+      });
+      
+      // Step 2: Calculate budgets from bottom up (WorkPackage level only)
+      const summarizedBudgets: Record<number, number> = {};
+      
+      // Find Summary items
+      const summaryItems = wbsItems.filter(item => item.type === "Summary");
+      
+      // For each summary item, calculate the total budget of its WorkPackage children
+      for (const summaryItem of summaryItems) {
+        const childKey = summaryItem.id.toString();
+        const children = itemsByParent[childKey] || [];
+        const workPackageChildren = children.filter(child => child.type === "WorkPackage");
+        
+        // Sum up only work package budgets
+        const totalBudget = workPackageChildren.reduce((total, wp) => {
+          return total + Number(wp.budgetedCost || 0);
+        }, 0);
+        
+        summarizedBudgets[summaryItem.id] = totalBudget;
+        
+        // Update the summary item with the calculated budget
+        await apiRequest("PATCH", `/api/wbs/${summaryItem.id}`, {
+          budgetedCost: totalBudget
+        });
+      }
+      
+      // Refresh data
+      await refetch();
+      
+      setIsFinalizingBudget(false);
+      return summarizedBudgets;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Budget Finalized",
+        description: "Work package budgets have been summarized to parent items successfully.",
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      setIsFinalizingBudget(false);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to finalize budget. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const toggleExpand = (itemId: number) => {
     setExpandedItems(prev => ({
@@ -111,7 +293,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
     );
   }
 
-  const renderTree = (items: WbsItem[], level = 0) => {
+  const renderTree = (items: WbsItem[], level = 0, budgetInfo: Record<number, { total: number, used: number, remaining: number }> = {}) => {
     return items.map(item => (
       <TreeItem
         key={item.id}
@@ -122,6 +304,9 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         onRefresh={handleRefresh}
         onUpdateProgress={handleUpdateProgress}
         onEdit={handleEditWbsItem}
+        isExpanded={!!expandedItems[item.id]}
+        onToggleExpand={toggleExpand}
+        budgetInfo={budgetInfo}
       />
     ));
   };
@@ -155,6 +340,15 @@ export function WbsTree({ projectId }: WbsTreeProps) {
             Collapse All
           </Button>
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => finalizeBudget.mutate()}
+            disabled={isFinalizingBudget || wbsItems.length === 0}
+          >
+            <DollarSign className="h-4 w-4 mr-1.5" />
+            {isFinalizingBudget ? "Finalizing..." : "Finalize Budget"}
+          </Button>
+          <Button
             size="sm"
             onClick={handleAddTopLevel}
           >
@@ -163,6 +357,68 @@ export function WbsTree({ projectId }: WbsTreeProps) {
           </Button>
         </div>
       </div>
+
+      {/* Project Budget Summary */}
+      {project && (
+        <div className="p-4 mb-2 bg-gray-50 border-b border-gray-200">
+          <h4 className="text-sm font-semibold mb-2">Project Budget Summary</h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <div className="text-xs text-gray-500">Total Project Budget</div>
+              <div className="text-base font-bold">{formatCurrency(budgetUsage.projectBudget)}</div>
+            </div>
+            
+            <div>
+              <div className="text-xs text-gray-500">Allocated to WBS</div>
+              <div className="text-base font-bold">
+                {formatCurrency(budgetUsage.topLevelAllocated)}
+                <span className="text-xs ml-1 font-normal">
+                  ({formatPercent(budgetUsage.percentAllocated)})
+                </span>
+              </div>
+              <div className="text-xs text-gray-500">
+                {budgetUsage.unallocated > 0 ? 
+                  `Unallocated: ${formatCurrency(budgetUsage.unallocated)}` : 
+                  <span className="text-amber-600 flex items-center">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    Over-allocated by {formatCurrency(Math.abs(budgetUsage.unallocated))}
+                  </span>
+                }
+              </div>
+            </div>
+            
+            <div>
+              <div className="text-xs text-gray-500">Work Package Budget Total</div>
+              <div className="text-base font-bold">{formatCurrency(budgetUsage.workPackageTotal)}</div>
+              {budgetUsage.workPackageTotal !== budgetUsage.topLevelAllocated && (
+                <div className="text-xs text-amber-600 flex items-center">
+                  <AlertCircle className="h-3 w-3 mr-1" />
+                  {budgetUsage.workPackageTotal > budgetUsage.topLevelAllocated ? 
+                    "Work packages exceed summary allocation" : 
+                    "Use Finalize Budget to update summaries"
+                  }
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Budget Usage Progress Bar */}
+          <div className="mt-3">
+            <div className="w-full bg-gray-200 rounded-full h-2 mb-1">
+              <div 
+                className={`h-2 rounded-full ${
+                  budgetUsage.percentAllocated > 100 ? 'bg-red-500' : 'bg-blue-600'
+                }`}
+                style={{ width: `${Math.min(100, budgetUsage.percentAllocated)}%` }}
+              ></div>
+            </div>
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>0%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <div className="min-w-max">
@@ -182,7 +438,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                 No WBS items found. Click "Add WBS Item" to create one.
               </div>
             ) : (
-              renderTree(rootItems)
+              renderTree(rootItems, 0, budgetInfo)
             )}
           </div>
         </div>
@@ -211,8 +467,18 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   );
 }
 
-function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgress, onEdit }: TreeItemProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+function TreeItem({ 
+  item, 
+  projectId, 
+  level, 
+  onAddChild, 
+  onRefresh, 
+  onUpdateProgress, 
+  onEdit,
+  isExpanded,
+  onToggleExpand,
+  budgetInfo
+}: TreeItemProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
   const [progress, setProgress] = useState(Number(item.percentComplete));
@@ -305,7 +571,7 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
   };
 
   const toggleExpand = () => {
-    setIsExpanded(!isExpanded);
+    onToggleExpand(item.id);
   };
 
   const formatIndent = (level: number) => {
@@ -314,6 +580,49 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
 
   const canHaveChildren = item.type !== "Activity";
   
+  // Get budget info for Summary or for parent of WorkPackage
+  const getBudgetDisplay = () => {
+    if (item.type === "Summary") {
+      const info = budgetInfo[item.id];
+      if (info) {
+        return (
+          <div>
+            <div>{formatCurrency(item.budgetedCost)}</div>
+            <div className="text-xs text-gray-500">
+              {`Used: ${formatCurrency(info.used)} | Remaining: `}
+              <span className={info.remaining < 0 ? "text-red-500 font-semibold" : "text-green-600"}>
+                {formatCurrency(info.remaining)}
+              </span>
+            </div>
+          </div>
+        );
+      }
+      return formatCurrency(item.budgetedCost);
+    } 
+    else if (item.type === "WorkPackage" && item.parentId) {
+      const parentInfo = budgetInfo[item.parentId];
+      if (parentInfo) {
+        return (
+          <div>
+            <div>{formatCurrency(item.budgetedCost)}</div>
+            <div className="text-xs text-gray-500">
+              {`Available: `}
+              <span className={parentInfo.remaining < 0 ? "text-red-500 font-semibold" : "text-green-600"}>
+                {formatCurrency(parentInfo.remaining + Number(item.budgetedCost))}
+              </span>
+            </div>
+          </div>
+        );
+      }
+      return formatCurrency(item.budgetedCost);
+    } 
+    else if (item.type === "Activity") {
+      return "N/A";
+    }
+    
+    return formatCurrency(item.budgetedCost);
+  };
+
   return (
     <>
       <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 hover:bg-gray-50">
@@ -354,8 +663,7 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
         </div>
         
         <div className="text-sm">
-          {item.type !== "Activity" && formatCurrency(item.budgetedCost)}
-          {item.type === "Activity" && "N/A"}
+          {item.type !== "Activity" ? getBudgetDisplay() : "N/A"}
         </div>
         
         <div className="text-sm">
@@ -473,6 +781,9 @@ function TreeItem({ item, projectId, level, onAddChild, onRefresh, onUpdateProgr
               onRefresh={onRefresh}
               onUpdateProgress={onUpdateProgress}
               onEdit={onEdit}
+              isExpanded={false}
+              onToggleExpand={onToggleExpand}
+              budgetInfo={budgetInfo}
             />
           ))}
           

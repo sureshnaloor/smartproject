@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { extendedInsertWbsItemSchema, InsertWbsItem, WbsItem } from "@shared/schema";
-import { calculateDuration, isValidDate } from "@/lib/utils";
+import { calculateDuration, isValidDate, formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
 import {
@@ -98,9 +98,10 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
         code: wbsItem.code,
         type: wbsItem.type as "Summary" | "WorkPackage" | "Activity",
         budgetedCost: Number(wbsItem.budgetedCost),
-        startDate: wbsItem.startDate ? new Date(wbsItem.startDate) : undefined,
-        endDate: wbsItem.endDate ? new Date(wbsItem.endDate) : undefined,
-        duration: wbsItem.duration || undefined,
+        // Only set dates for Activity type, otherwise set to undefined
+        startDate: wbsItem.type === "Activity" && wbsItem.startDate ? new Date(wbsItem.startDate) : undefined,
+        endDate: wbsItem.type === "Activity" && wbsItem.endDate ? new Date(wbsItem.endDate) : undefined,
+        duration: wbsItem.type === "Activity" ? wbsItem.duration || undefined : undefined,
         isTopLevel: wbsItem.isTopLevel,
       });
     }
@@ -116,8 +117,8 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
       // Top-level items can only be Summary
       newAllowedTypes = ["Summary"];
     } else if (parentItem?.type === "Summary") {
-      // Under Summary, can be either Summary or WorkPackage
-      newAllowedTypes = ["Summary", "WorkPackage"];
+      // Under Summary, can ONLY be WorkPackage
+      newAllowedTypes = ["WorkPackage"];
     } else if (parentItem?.type === "WorkPackage") {
       // Under WorkPackage, can only be Activity
       newAllowedTypes = ["Activity"];
@@ -133,12 +134,21 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
   // Update form fields based on WBS type
   useEffect(() => {
     if (type === "Summary" || type === "WorkPackage") {
-      // For Summary and WorkPackage: set default dates but hide them in the UI
-      // This is a workaround for the database constraint while the schema is being updated
-      const defaultDate = new Date();
-      form.setValue("startDate", defaultDate);
-      form.setValue("endDate", defaultDate);
-      form.setValue("duration", 1);
+      // For Summary and WorkPackage: set date fields to undefined
+      form.setValue("startDate", undefined);
+      form.setValue("endDate", undefined);
+      form.setValue("duration", undefined);
+      
+      // For WorkPackage, check if parent budget needs to be considered
+      if (type === "WorkPackage" && parentItem) {
+        // Set max budget to parent's budget
+        const maxBudget = Number(parentItem.budgetedCost) || 0;
+        // If current budget exceeds parent budget, cap it
+        const currentBudget = form.getValues("budgetedCost") || 0;
+        if (currentBudget > maxBudget) {
+          form.setValue("budgetedCost", maxBudget);
+        }
+      }
     } else if (type === "Activity") {
       // For Activity: has dates but no budget
       form.setValue("budgetedCost", 0);
@@ -156,7 +166,7 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
         form.setValue("duration", 7);
       }
     }
-  }, [type, form]);
+  }, [type, form, parentItem]);
 
   // Update dates and duration when one changes
   const updateDatesAndDuration = (field: 'startDate' | 'endDate' | 'duration', value: any) => {
@@ -192,6 +202,38 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
     }
   };
 
+  // Calculate remaining budget for parent
+  const getRemainingParentBudget = (): number => {
+    if (!wbsItem?.parentId || !parentItem || parentItem.type !== 'Summary' || wbsItem.type !== 'WorkPackage') {
+      return 0;
+    }
+    
+    // For a WorkPackage, calculate how much budget is left on the parent Summary
+    const totalParentBudget = Number(parentItem.budgetedCost) || 0;
+    
+    // Find all other WorkPackage siblings
+    const siblings = wbsItems.filter(item => 
+      item.parentId === wbsItem.parentId && 
+      item.type === 'WorkPackage' &&
+      item.id !== wbsItemId  // Exclude the current item
+    );
+    
+    // Sum up other sibling budgets
+    const usedBudget = siblings.reduce((total, sibling) => {
+      return total + Number(sibling.budgetedCost || 0);
+    }, 0);
+    
+    return totalParentBudget - usedBudget;
+  };
+
+  const remainingBudget = getRemainingParentBudget();
+  
+  // Get maximum allowable budget (remaining + current item's budget)
+  const getMaxBudget = (): number => {
+    if (!wbsItem || wbsItem.type !== 'WorkPackage') return 0;
+    return remainingBudget + Number(wbsItem.budgetedCost);
+  };
+
   // Update WBS item mutation
   const updateWbsItem = useMutation({
     mutationFn: async (data: Partial<InsertWbsItem>) => {
@@ -222,7 +264,15 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
   const onSubmit = (data: InsertWbsItem) => {
     // We don't want to update certain fields that shouldn't change
     const { projectId, code, level, isTopLevel, ...updateData } = data;
-    updateWbsItem.mutate(updateData);
+    
+    // For Summary and WorkPackage types, remove date fields as they should be null
+    if (updateData.type === "Summary" || updateData.type === "WorkPackage") {
+      const { startDate, endDate, duration, ...nonActivityData } = updateData;
+      updateWbsItem.mutate(nonActivityData);
+    } else {
+      // For Activity types, include all fields
+      updateWbsItem.mutate(updateData);
+    }
   };
 
   if (isLoadingWbsItem) {
@@ -346,17 +396,38 @@ export function EditWbsModal({ wbsItemId, isOpen, onClose, onSuccess }: EditWbsM
                       type="number"
                       step="0.01"
                       min="0"
+                      max={type === "WorkPackage" && parentItem ? Number(parentItem.budgetedCost) : undefined}
                       placeholder="0.00"
                       {...field}
                       value={field.value || 0}
-                      onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value);
+                        // For WorkPackage, ensure budget doesn't exceed maximum allowed
+                        if (type === "WorkPackage" && parentItem) {
+                          const maxAllowed = getMaxBudget();
+                          if (value > maxAllowed) {
+                            field.onChange(maxAllowed);
+                            toast({
+                              title: "Budget limit reached",
+                              description: `Work package budget cannot exceed available budget of ${formatCurrency(maxAllowed)}`,
+                              variant: "destructive",
+                            });
+                          } else {
+                            field.onChange(value);
+                          }
+                        } else {
+                          field.onChange(value);
+                        }
+                      }}
                       disabled={type === "Activity"}
                     />
                   </FormControl>
                   <FormDescription>
                     {type === "Activity" ? 
                       "Activity items cannot have a budget" : 
-                      "Budget for this work item"
+                      type === "WorkPackage" && parentItem ? 
+                        `Available budget: ${formatCurrency(getMaxBudget())} (parent total: ${formatCurrency(parentItem.budgetedCost)})` :
+                        "Budget for this work item"
                     }
                   </FormDescription>
                   <FormMessage />

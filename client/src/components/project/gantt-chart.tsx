@@ -18,13 +18,20 @@ interface GanttChartProps {
 }
 
 interface GanttItemProps {
-  item: WbsItem;
+  item: WbsItem & { children?: (WbsItem & { children?: any[] })[] };
   startDate: Date;
   totalDays: number;
   level: number;
   isExpanded: boolean;
   onToggleExpand: (id: number) => void;
+  expandedItems?: Record<number, boolean>;
 }
+
+// Helper function to format percentage
+const formatPercent = (value: number | string | null | undefined): string => {
+  if (value === null || value === undefined) return "0%";
+  return `${Math.round(Number(value))}%`;
+};
 
 export function GanttChart({ projectId }: GanttChartProps) {
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
@@ -221,6 +228,7 @@ export function GanttChart({ projectId }: GanttChartProps) {
               level={level}
               isExpanded={isExpanded}
               onToggleExpand={toggleExpand}
+              expandedItems={expandedItems}
             />
             
             {isExpanded && item.children.length > 0 && (
@@ -337,7 +345,8 @@ function GanttItem({
   totalDays,
   level,
   isExpanded,
-  onToggleExpand
+  onToggleExpand,
+  expandedItems = {}
 }: GanttItemProps) {
   const hasChildren = item.children && item.children.length > 0;
 
@@ -435,7 +444,7 @@ function GanttItem({
         </div>
       </div>
       
-      {isExpanded && hasChildren && (
+      {isExpanded && hasChildren && item.children && (
         <>
           {item.children.map(child => (
             <GanttItem
@@ -446,6 +455,7 @@ function GanttItem({
               level={level + 1}
               isExpanded={!!expandedItems[child.id]}
               onToggleExpand={onToggleExpand}
+              expandedItems={expandedItems}
             />
           ))}
         </>

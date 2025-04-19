@@ -134,10 +134,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         description: z.string().nullable().optional(),
         budget: z.number().optional(),
         startDate: z.string().optional(),
-        endDate: z.string().optional()
+        endDate: z.string().optional(),
+        currency: z.enum(["USD", "EUR", "SAR"]).optional(),
       });
 
       const projectData = partialProjectSchema.parse(req.body);
+      
+      // Check if budget is being changed
+      if (projectData.budget !== undefined && projectData.budget !== Number(project.budget)) {
+        // Get all WBS items for the project
+        const wbsItems = await storage.getWbsItems(id);
+        
+        // Check if only the default 3 WBS items exist (no user-added items)
+        const hasOnlyDefaultWbs = wbsItems.length === 3 && 
+          wbsItems.every(item => item.isTopLevel) &&
+          wbsItems.every(item => item.parentId === null);
+        
+        if (hasOnlyDefaultWbs) {
+          // Calculate budget difference
+          const budgetDifference = projectData.budget - Number(project.budget);
+          
+          // Find the "Procurement & Construction" WBS item
+          const procurementWbs = wbsItems.find(item => item.name === "Procurement & Construction");
+          
+          if (procurementWbs) {
+            // Adjust the budget of the "Procurement & Construction" WBS item
+            const newBudget = Number(procurementWbs.budgetedCost) + budgetDifference;
+            
+            // Ensure budget doesn't go negative
+            if (newBudget < 0) {
+              return res.status(400).json({ 
+                message: "Cannot reduce project budget by this amount as it would result in a negative budget for the Procurement & Construction WBS item" 
+              });
+            }
+            
+            // Update the WBS item budget
+            await storage.updateWbsItem(procurementWbs.id, {
+              budgetedCost: newBudget
+            });
+          }
+        } else {
+          // If custom WBS items exist, prevent budget changes
+          return res.status(400).json({ 
+            message: "Cannot change project budget after custom WBS items have been added" 
+          });
+        }
+      }
+
       const updatedProject = await storage.updateProject(id, projectData);
       
       res.json(updatedProject);
@@ -222,6 +265,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // BUDGET VALIDATION
+      // If the WBS item has a parent, validate budget constraints
+      if (wbsItemData.parentId && wbsItemData.type !== "Activity") {
+        const parentWbsItem = await storage.getWbsItem(wbsItemData.parentId);
+        if (!parentWbsItem) {
+          return res.status(404).json({ message: "Parent WBS item not found" });
+        }
+        
+        // Check that the new item's budget doesn't exceed parent's budget
+        if (wbsItemData.budgetedCost > Number(parentWbsItem.budgetedCost)) {
+          return res.status(400).json({ 
+            message: `Budget cannot exceed parent's budget of ${parentWbsItem.budgetedCost}`
+          });
+        }
+        
+        // Get all siblings to validate that total budget doesn't exceed parent budget
+        const allWbsItems = await storage.getWbsItems(wbsItemData.projectId);
+        const siblings = allWbsItems.filter(
+          item => item.parentId === wbsItemData.parentId && item.type !== "Activity"
+        );
+        
+        // Calculate sum of existing sibling budgets
+        const siblingsSum = siblings.reduce((sum, sibling) => sum + Number(sibling.budgetedCost), 0);
+        
+        // Check that new item + siblings doesn't exceed parent budget
+        if (siblingsSum + wbsItemData.budgetedCost > Number(parentWbsItem.budgetedCost)) {
+          return res.status(400).json({ 
+            message: `Sum of all child budgets (${siblingsSum + wbsItemData.budgetedCost}) cannot exceed parent's budget (${parentWbsItem.budgetedCost})`
+          });
+        }
+      }
+
+      // TYPE VALIDATION
       // Rule 2: If parent exists, validate parent-child type relationships
       if (wbsItemData.parentId) {
         const parentWbsItem = await storage.getWbsItem(wbsItemData.parentId);
@@ -303,6 +379,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const wbsItemData = partialWbsSchema.parse(req.body);
       
+      // BUDGET VALIDATION
+      // Check if the budget is being changed
+      if (wbsItemData.budgetedCost !== undefined && wbsItemData.budgetedCost !== Number(wbsItem.budgetedCost)) {
+        // Get all WBS items for the project to validate budget constraints
+        const projectWbsItems = await storage.getWbsItems(wbsItem.projectId);
+        
+        // 1. If item has a parent, check that new budget doesn't exceed parent budget
+        if (wbsItem.parentId) {
+          const parentWbsItem = projectWbsItems.find(item => item.id === wbsItem.parentId);
+          if (parentWbsItem) {
+            // Only apply this constraint to Summary and WorkPackage types (Activity can't have budget)
+            if (wbsItem.type !== "Activity" && wbsItemData.budgetedCost > Number(parentWbsItem.budgetedCost)) {
+              return res.status(400).json({ 
+                message: `Budget cannot exceed parent's budget of ${parentWbsItem.budgetedCost}`
+              });
+            }
+          }
+        }
+        
+        // 2. If item has children, check that sum of all children's budgets doesn't exceed this item's budget
+        // We don't enforce this for "Activity" types since they can't have children
+        if (wbsItem.type !== "Activity") {
+          const childItems = projectWbsItems.filter(item => item.parentId === wbsItem.id);
+          if (childItems.length > 0) {
+            // Calculate sum of child budgets, not including Activities (they have 0 budget)
+            const childBudgetSum = childItems
+              .filter(child => child.type !== "Activity")
+              .reduce((sum, child) => sum + Number(child.budgetedCost), 0);
+            
+            if (childBudgetSum > wbsItemData.budgetedCost) {
+              return res.status(400).json({ 
+                message: `Budget cannot be less than the sum of child budgets (${childBudgetSum})`
+              });
+            }
+          }
+        }
+      }
+      
+      // TYPE VALIDATION
       // If changing type, apply the same business rules
       if (wbsItemData.type && wbsItemData.type !== wbsItem.type) {
         // Top-level items must be Summary
