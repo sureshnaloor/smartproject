@@ -1,0 +1,26 @@
+version: 1
+env:
+  variables:
+    NODE_ENV: production
+
+phases:
+  preBuild:
+    commands:
+      - echo Installing dependencies...
+      - npm ci
+  build:
+    commands:
+      - echo Building the application...
+      - npm run build:amplify
+  postBuild:
+    commands:
+      - echo Deployment preparation complete
+
+artifacts:
+  baseDirectory: dist
+  files:
+    - '**/*'
+
+cache:
+  paths:
+    - node_modules/**/* 
