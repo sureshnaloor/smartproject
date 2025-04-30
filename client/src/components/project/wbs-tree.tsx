@@ -738,9 +738,9 @@ function TreeItem({
         <div className="flex items-center">
           <button
             type="button"
-            className={`mr-1 ${canHaveChildren ? 'opacity-100' : 'opacity-0'}`}
+            className={`mr-1 ${item.type === "Summary" ? 'opacity-100' : 'opacity-0'}`}
             onClick={toggleExpand}
-            disabled={!canHaveChildren}
+            disabled={item.type !== "Summary"}
           >
             {isExpanded ? (
               <ChevronDown className="h-4 w-4 text-gray-500" />
@@ -750,7 +750,9 @@ function TreeItem({
           </button>
           
           <div className="ml-1" style={{ marginLeft: `${level * 16}px` }}>
-            <div className="font-medium text-sm">{item.name}</div>
+            <div className={`font-medium text-sm ${
+              item.type === "WorkPackage" ? "text-purple-800" : ""
+            }`}>{item.name}</div>
             <div className="text-xs text-gray-500">{item.description}</div>
           </div>
         </div>
