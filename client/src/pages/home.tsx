@@ -146,7 +146,7 @@ export default function Home() {
                   <div className="space-y-3">
                     <div className="flex items-center text-sm">
                       <DollarSign className="mr-2 h-4 w-4 text-gray-500" />
-                      <span className="text-gray-700 font-medium">{formatCurrency(project.budget)}</span>
+                      <span className="text-gray-700 font-medium">{formatCurrency(project.budget, project.currency || "USD")}</span>
                     </div>
                     <div className="flex items-center text-sm">
                       <Clock className="mr-2 h-4 w-4 text-gray-500" />

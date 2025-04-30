@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { WbsItem, UpdateWbsProgress, Project } from "@shared/schema";
+import { WbsItem, UpdateWbsProgress } from "@shared/schema";
 import { formatCurrency, formatDate, formatPercent, formatShortDate, buildWbsHierarchy } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddWbsModal } from "./add-wbs-modal";
 import { EditWbsModal } from "./edit-wbs-modal";
@@ -62,7 +62,7 @@ interface TreeItemProps {
 }
 
 // Interface for Project data
-interface Project {
+interface ProjectData {
   id: number;
   name: string;
   description?: string;
@@ -84,9 +84,12 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   const queryClient = useQueryClient();
 
   // Fetch project details to get total budget
-  const { data: project } = useQuery<Project>({
+  const { data: project } = useQuery<ProjectData>({
     queryKey: [`/api/projects/${projectId}`],
   });
+
+  // Get the project currency or default to USD if not available
+  const projectCurrency = project?.currency || "USD";
 
   // Fetch WBS items for the project
   const { 
@@ -283,6 +286,10 @@ export function WbsTree({ projectId }: WbsTreeProps) {
     setIsEditModalOpen(true);
   };
 
+  // Add a check to determine if budget is finalized
+  const isBudgetFinalized = Math.abs(budgetUsage.workPackageTotal - budgetUsage.topLevelAllocated) < 0.01 && 
+                          budgetUsage.workPackageTotal > 0;
+
   if (isLoading) {
     return (
       <div className="space-y-3 p-4">
@@ -312,76 +319,62 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-      <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-        <h3 className="text-base font-semibold">Work Breakdown Structure</h3>
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold">Work Breakdown Structure</h2>
         <div className="flex space-x-2">
           <Button 
             variant="outline" 
             size="sm"
-            onClick={() => {
-              Object.keys(wbsItems).forEach(key => {
-                setExpandedItems(prev => ({
-                  ...prev,
-                  [Number(key)]: true
-                }));
-              });
-            }}
+            onClick={handleAddTopLevel}
+            disabled={isLoading || isBudgetFinalized}
           >
-            <ChevronDown className="h-4 w-4 mr-1.5" />
-            Expand All
+            <Plus className="h-4 w-4 mr-1" />
+            Add Top-Level
           </Button>
           <Button 
             variant="outline" 
             size="sm"
-            onClick={() => setExpandedItems({})}
+            onClick={() => setIsFinalizingBudget(true)}
+            disabled={isLoading || isBudgetFinalized || wbsItems.length === 0}
           >
-            <ChevronRight className="h-4 w-4 mr-1.5" />
-            Collapse All
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => finalizeBudget.mutate()}
-            disabled={isFinalizingBudget || wbsItems.length === 0}
-          >
-            <DollarSign className="h-4 w-4 mr-1.5" />
-            {isFinalizingBudget ? "Finalizing..." : "Finalize Budget"}
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleAddTopLevel}
-          >
-            <Plus className="h-4 w-4 mr-1.5" />
-            Add WBS Item
+            <DollarSign className="h-4 w-4 mr-1" />
+            Finalize Budget
           </Button>
         </div>
       </div>
 
-      {/* Project Budget Summary */}
+      {isLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+        </div>
+      ) : (
+        <div className="overflow-auto flex-1 border border-gray-200 rounded-md">
       {project && (
         <div className="p-4 mb-2 bg-gray-50 border-b border-gray-200">
           <h4 className="text-sm font-semibold mb-2">Project Budget Summary</h4>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <div className="text-xs text-gray-500">Total Project Budget</div>
-              <div className="text-base font-bold">{formatCurrency(budgetUsage.projectBudget)}</div>
+                  <div className="text-base font-bold">{formatCurrency(budgetUsage.projectBudget, projectCurrency)}</div>
             </div>
             
             <div>
               <div className="text-xs text-gray-500">Allocated to WBS</div>
               <div className="text-base font-bold">
-                {formatCurrency(budgetUsage.topLevelAllocated)}
+                    {formatCurrency(budgetUsage.topLevelAllocated, projectCurrency)}
                 <span className="text-xs ml-1 font-normal">
                   ({formatPercent(budgetUsage.percentAllocated)})
                 </span>
               </div>
               <div className="text-xs text-gray-500">
                 {budgetUsage.unallocated > 0 ? 
-                  `Unallocated: ${formatCurrency(budgetUsage.unallocated)}` : 
+                      `Unallocated: ${formatCurrency(budgetUsage.unallocated, projectCurrency)}` : 
                   <span className="text-amber-600 flex items-center">
                     <AlertCircle className="h-3 w-3 mr-1" />
-                    Over-allocated by {formatCurrency(Math.abs(budgetUsage.unallocated))}
+                        Over-allocated by {formatCurrency(Math.abs(budgetUsage.unallocated), projectCurrency)}
                   </span>
                 }
               </div>
@@ -389,7 +382,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
             
             <div>
               <div className="text-xs text-gray-500">Work Package Budget Total</div>
-              <div className="text-base font-bold">{formatCurrency(budgetUsage.workPackageTotal)}</div>
+                  <div className="text-base font-bold">{formatCurrency(budgetUsage.workPackageTotal, projectCurrency)}</div>
               {budgetUsage.workPackageTotal !== budgetUsage.topLevelAllocated && (
                 <div className="text-xs text-amber-600 flex items-center">
                   <AlertCircle className="h-3 w-3 mr-1" />
@@ -399,6 +392,12 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                   }
                 </div>
               )}
+                  {isBudgetFinalized && (
+                    <div className="text-xs text-green-600 flex items-center">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Budget finalized
+                    </div>
+                  )}
             </div>
           </div>
           {/* Budget Usage Progress Bar */}
@@ -420,49 +419,105 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <div className="min-w-max">
-          <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 font-medium text-sm bg-gray-50 border-b border-gray-200">
-            <div>WBS Item</div>
-            <div>Code</div>
-            <div>Type</div>
-            <div>Budget</div>
-            <div>Actual Cost</div>
-            <div>Progress</div>
-            <div>Actions</div>
-          </div>
-
-          <div className="divide-y divide-gray-100">
+          <div className="p-4">
             {rootItems.length === 0 ? (
-              <div className="px-4 py-3 text-center text-gray-500">
-                No WBS items found. Click "Add WBS Item" to create one.
+              <div className="text-center text-gray-500 py-8">
+                No WBS items found. Create a top-level item to get started.
               </div>
             ) : (
-              renderTree(rootItems, 0, budgetInfo)
+              <div className="space-y-2">
+                {renderTree(rootItems, 0, budgetInfo)}
+              </div>
             )}
           </div>
         </div>
-      </div>
+      )}
 
+      {/* Add WBS Modal */}
       <AddWbsModal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
         projectId={projectId}
         parentId={selectedParentId}
-        onSuccess={handleRefresh}
+        isOpen={isAddModalOpen} 
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={() => {
+          refetch();
+          setIsAddModalOpen(false);
+        }}
       />
 
+      {/* Edit WBS Modal */}
       {selectedWbsItem && (
         <EditWbsModal
-          isOpen={isEditModalOpen}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            setSelectedWbsItem(null);
-          }}
           wbsItemId={selectedWbsItem.id}
-          onSuccess={handleRefresh}
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          onSuccess={() => {
+            refetch();
+            setIsEditModalOpen(false);
+          }}
         />
       )}
+
+      {/* Finalize Budget Dialog */}
+      <Dialog open={isFinalizingBudget} onOpenChange={setIsFinalizingBudget}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Finalize Project Budget Allocation</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p>This will automatically adjust summary-level budget allocations to match work package totals.</p>
+            
+            <div className="mt-4 bg-amber-50 border border-amber-200 rounded-md p-3 text-sm">
+              <h4 className="font-semibold text-amber-700">Before update:</h4>
+              <div className="mt-1 grid grid-cols-2 gap-1">
+                <div className="text-gray-500">Project budget:</div>
+                <div className="font-medium">{formatCurrency(budgetUsage.projectBudget, projectCurrency)}</div>
+                
+                <div className="text-gray-500">Summary allocations:</div>
+                <div className="font-medium">{formatCurrency(budgetUsage.topLevelAllocated, projectCurrency)}</div>
+                
+                <div className="text-gray-500">Work package total:</div>
+                <div className="font-medium">{formatCurrency(budgetUsage.workPackageTotal, projectCurrency)}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3 text-sm">
+              <h4 className="font-semibold text-blue-700">Note:</h4>
+              <p className="mt-1 text-blue-700">
+                After finalization, you won't be able to add new top-level WBS items. 
+                The "Add Top-Level" and "Finalize Budget" buttons will be disabled.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsFinalizingBudget(false)}>Cancel</Button>
+            <Button 
+              onClick={() => {
+                finalizeBudget.mutate(undefined, {
+                  onSuccess: () => {
+                    toast({
+                      title: "Budget allocation updated",
+                      description: "Summary budgets have been adjusted to match work package totals",
+                    });
+                    setIsFinalizingBudget(false);
+                    refetch();
+                  },
+                  onError: (error) => {
+                    toast({
+                      title: "Error updating budget allocation",
+                      description: "There was an error updating the budget allocation",
+                      variant: "destructive",
+                    });
+                  }
+                });
+              }}
+              disabled={finalizeBudget.isPending}
+            >
+              {finalizeBudget.isPending ? "Updating..." : "Update Allocations"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -481,15 +536,22 @@ function TreeItem({
 }: TreeItemProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
-  const [progress, setProgress] = useState(Number(item.percentComplete));
-  const [actualStartDate, setActualStartDate] = useState<Date | undefined>(
-    item.actualStartDate ? new Date(item.actualStartDate) : undefined
-  );
-  const [actualEndDate, setActualEndDate] = useState<Date | undefined>(
+  const [progress, setProgress] = useState(Number(item.percentComplete) || 0);
+  const [actualCost, setActualCost] = useState(Number(item.actualCost) || 0);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(
     item.actualEndDate ? new Date(item.actualEndDate) : undefined
   );
-  const { toast } = useToast();
+  
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Fetch project data to get the currency
+  const { data: project } = useQuery<ProjectData>({
+    queryKey: [`/api/projects/${projectId}`],
+  });
+
+  // Get the project currency or default to USD if not available
+  const projectCurrency = project?.currency || "USD";
 
   // Fetch child WBS items
   const { data: childItems = [] } = useQuery<WbsItem[]>({
@@ -553,10 +615,10 @@ function TreeItem({
 
   const handleProgressSubmit = () => {
     // Only allow setting actual dates for Activity type
-    if (item.type !== "Activity" && (actualStartDate || actualEndDate)) {
+    if (item.type !== "Activity" && (selectedDate)) {
       toast({
         title: "Validation Error",
-        description: "Only Activity items can have actual start and end dates.",
+        description: "Only Activity items can have actual end dates.",
         variant: "destructive",
       });
       return;
@@ -565,8 +627,7 @@ function TreeItem({
     updateProgress.mutate({
       id: item.id,
       percentComplete: progress,
-      actualStartDate,
-      actualEndDate,
+      actualEndDate: selectedDate,
     });
   };
 
@@ -587,40 +648,40 @@ function TreeItem({
       if (info) {
         return (
           <div>
-            <div>{formatCurrency(item.budgetedCost)}</div>
+            <div>{formatCurrency(item.budgetedCost, projectCurrency)}</div>
             <div className="text-xs text-gray-500">
-              {`Used: ${formatCurrency(info.used)} | Remaining: `}
+              {`Used: ${formatCurrency(info.used, projectCurrency)} | Remaining: `}
               <span className={info.remaining < 0 ? "text-red-500 font-semibold" : "text-green-600"}>
-                {formatCurrency(info.remaining)}
+                {formatCurrency(info.remaining, projectCurrency)}
               </span>
             </div>
           </div>
         );
       }
-      return formatCurrency(item.budgetedCost);
+      return formatCurrency(item.budgetedCost, projectCurrency);
     } 
     else if (item.type === "WorkPackage" && item.parentId) {
       const parentInfo = budgetInfo[item.parentId];
       if (parentInfo) {
         return (
           <div>
-            <div>{formatCurrency(item.budgetedCost)}</div>
+            <div>{formatCurrency(item.budgetedCost, projectCurrency)}</div>
             <div className="text-xs text-gray-500">
               {`Available: `}
               <span className={parentInfo.remaining < 0 ? "text-red-500 font-semibold" : "text-green-600"}>
-                {formatCurrency(parentInfo.remaining + Number(item.budgetedCost))}
+                {formatCurrency(parentInfo.remaining + Number(item.budgetedCost), projectCurrency)}
               </span>
             </div>
           </div>
         );
       }
-      return formatCurrency(item.budgetedCost);
+      return formatCurrency(item.budgetedCost, projectCurrency);
     } 
     else if (item.type === "Activity") {
       return "N/A";
     }
     
-    return formatCurrency(item.budgetedCost);
+    return formatCurrency(item.budgetedCost, projectCurrency);
   };
 
   return (
@@ -848,21 +909,10 @@ function TreeItem({
             {item.type === "Activity" && (
               <>
                 <div className="grid gap-2">
-                  <Label htmlFor="actual-start-date">Actual Start Date</Label>
-                  <DatePicker
-                    date={actualStartDate}
-                    setDate={setActualStartDate}
-                  />
-                </div>
-                
-                <div className="grid gap-2">
                   <Label htmlFor="actual-end-date">Actual End Date</Label>
                   <DatePicker
-                    date={actualEndDate}
-                    setDate={setActualEndDate}
-                    disabledDates={(date: Date): boolean => {
-                      return actualStartDate ? date < actualStartDate : false;
-                    }}
+                    date={selectedDate}
+                    setDate={setSelectedDate}
                   />
                 </div>
               </>
