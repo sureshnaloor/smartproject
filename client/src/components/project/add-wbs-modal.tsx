@@ -403,7 +403,7 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                     </Select>
                     <FormDescription>
                       {!parentId ? 
-                        "Top-level items must be Summary type" : 
+                        "Top-level items can only be Summary type" : 
                         parentItem?.type === "WorkPackage" ? 
                           "WorkPackage items can only have Activity children" :
                           "Summary items can only have WorkPackage children"
