@@ -59,6 +59,7 @@ interface TreeItemProps {
   isExpanded: boolean;
   onToggleExpand: (id: number) => void;
   budgetInfo: Record<number, { total: number, used: number, remaining: number }>;
+  isBudgetFinalized: boolean;
 }
 
 // Interface for Project data
@@ -264,6 +265,16 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   };
 
   const handleAddChild = (parentId: number) => {
+    // Skip if budget is finalized
+    if (isBudgetFinalized) {
+      toast({
+        title: "Budget is finalized",
+        description: "Cannot add new items when budget is finalized.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setSelectedParentId(parentId);
     setIsAddModalOpen(true);
   };
@@ -278,10 +289,32 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   };
 
   const handleUpdateProgress = (item: WbsItem) => {
+    // Skip if budget is finalized
+    if (isBudgetFinalized) {
+      toast({
+        title: "Budget is finalized",
+        description: "Cannot update progress for items when budget is finalized.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Set the selected WBS item and open the Edit modal
+    setSelectedWbsItem(item);
     // Logic to update progress (implemented in the TreeItem component)
   };
 
   const handleEditWbsItem = (item: WbsItem) => {
+    // Skip if budget is finalized
+    if (isBudgetFinalized) {
+      toast({
+        title: "Budget is finalized",
+        description: "Cannot edit items when budget is finalized.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setSelectedWbsItem(item);
     setIsEditModalOpen(true);
   };
@@ -314,6 +347,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         isExpanded={!!expandedItems[item.id]}
         onToggleExpand={toggleExpand}
         budgetInfo={budgetInfo}
+        isBudgetFinalized={isBudgetFinalized}
       />
     ));
   };
@@ -532,7 +566,8 @@ function TreeItem({
   onEdit,
   isExpanded,
   onToggleExpand,
-  budgetInfo
+  budgetInfo,
+  isBudgetFinalized
 }: TreeItemProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
@@ -750,82 +785,91 @@ function TreeItem({
         </div>
         
         <div className="flex space-x-1">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => onEdit(item)}
-                >
-                  <PencilIcon className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Edit Item</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          {isBudgetFinalized ? (
+            <span className="text-xs text-green-600 flex items-center">
+              <CheckCircle className="h-4 w-4 mr-1" />
+              Finalized
+            </span>
+          ) : (
+            <>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => onEdit(item)}
+                    >
+                      <PencilIcon className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Edit Item</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => onUpdateProgress(item)}
-                  disabled={updateProgress.isPending}
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Update Progress</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          
-          {canHaveChildren && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => onAddChild(item.id)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Add Child Item</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          
-          {!item.isTopLevel && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-red-600"
-                    onClick={() => setIsDeleteDialogOpen(true)}
-                    disabled={deleteWbsItem.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Delete Item</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => onUpdateProgress(item)}
+                      disabled={updateProgress.isPending}
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Update Progress</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              
+              {canHaveChildren && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => onAddChild(item.id)}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Add Child Item</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              
+              {!item.isTopLevel && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-600"
+                        onClick={() => setIsDeleteDialogOpen(true)}
+                        disabled={deleteWbsItem.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Delete Item</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -845,6 +889,7 @@ function TreeItem({
               isExpanded={false}
               onToggleExpand={onToggleExpand}
               budgetInfo={budgetInfo}
+              isBudgetFinalized={isBudgetFinalized}
             />
           ))}
           
