@@ -3,8 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { extendedInsertWbsItemSchema, InsertWbsItem, WbsItem } from "@shared/schema";
-import { calculateDuration, isValidDate, formatCurrency } from "@/lib/utils";
+import { extendedInsertWbsItemSchema, InsertWbsItem, WbsItem, Project } from "@shared/schema";
+import { calculateDuration, isValidDate, formatCurrency, getCurrencySymbol } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
 import {
@@ -52,6 +52,15 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
   const [allowedTypes, setAllowedTypes] = useState<string[]>(["Summary"]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Fetch project data to get the currency
+  const { data: project } = useQuery<Project>({
+    queryKey: [`/api/projects/${projectId}`],
+    enabled: isOpen,
+  });
+  
+  // Get the project currency or default to USD if not available
+  const projectCurrency = project?.currency || "USD";
 
   // Fetch WBS items for the project to use as parent options and predecessors
   const { data: wbsItems = [] } = useQuery<WbsItem[]>({
@@ -429,7 +438,7 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                 name="budgetedCost"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Budgeted Cost ($)</FormLabel>
+                    <FormLabel>Budgeted Cost ({getCurrencySymbol(projectCurrency)})</FormLabel>
                     <FormControl>
                       <Input 
                         type="number"
@@ -446,7 +455,7 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                             field.onChange(Number(parentItem.budgetedCost));
                             toast({
                               title: "Budget limit reached",
-                              description: `Work package budget cannot exceed parent budget of ${formatCurrency(parentItem.budgetedCost)}`,
+                              description: `Work package budget cannot exceed parent budget of ${formatCurrency(parentItem.budgetedCost, projectCurrency)}`,
                               variant: "destructive",
                             });
                           } else {
@@ -459,7 +468,7 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                       {type === "Activity" ? 
                         "Activity items cannot have a budget" : 
                         type === "WorkPackage" && parentItem ?
-                          `Budget cannot exceed parent's budget of ${formatCurrency(parentItem.budgetedCost)}. Available: ${formatCurrency(remainingBudget)}` :
+                          `Budget cannot exceed parent's budget of ${formatCurrency(parentItem.budgetedCost, projectCurrency)}. Available: ${formatCurrency(remainingBudget, projectCurrency)}` :
                           "Budget for this work item"
                       }
                     </FormDescription>
