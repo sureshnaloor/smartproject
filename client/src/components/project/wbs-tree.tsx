@@ -209,11 +209,29 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         itemsByParent[parentKey].push(item);
       });
       
+      // Check for summary items without work package children
+      const summaryItemsWithoutWorkPackages: WbsItem[] = [];
+      const summaryItems = wbsItems.filter(item => item.type === "Summary");
+      
+      for (const summaryItem of summaryItems) {
+        const childKey = summaryItem.id.toString();
+        const children = itemsByParent[childKey] || [];
+        const workPackageChildren = children.filter(child => child.type === "WorkPackage");
+        
+        if (workPackageChildren.length === 0) {
+          summaryItemsWithoutWorkPackages.push(summaryItem);
+        }
+      }
+      
+      // If there are summary items without work packages, throw an error
+      if (summaryItemsWithoutWorkPackages.length > 0) {
+        const summaryNames = summaryItemsWithoutWorkPackages.map(item => item.name).join(", ");
+        setIsFinalizingBudget(false);
+        throw new Error(`The summary WBS "${summaryNames}" do not have any child work package WBS. Include work package WBS or delete the summary WBS.`);
+      }
+      
       // Step 2: Calculate budgets from bottom up (WorkPackage level only)
       const summarizedBudgets: Record<number, number> = {};
-      
-      // Find Summary items
-      const summaryItems = wbsItems.filter(item => item.type === "Summary");
       
       // For each summary item, calculate the total budget of its WorkPackage children
       for (const summaryItem of summaryItems) {
@@ -250,7 +268,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
     onError: (error) => {
       setIsFinalizingBudget(false);
       toast({
-        title: "Error",
+        title: "Cannot finalize budget",
         description: error.message || "Failed to finalize budget. Please try again.",
         variant: "destructive",
       });
@@ -551,10 +569,12 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                   },
                   onError: (error) => {
                     toast({
-                      title: "Error updating budget allocation",
-                      description: "There was an error updating the budget allocation",
+                      title: "Cannot finalize budget",
+                      description: error.message || "Failed to finalize budget. Please try again.",
                       variant: "destructive",
                     });
+                    // Make sure dialog is closed on error
+                    setIsFinalizingBudget(false);
                   }
                 });
               }}
