@@ -4,7 +4,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, UpdateWbsProgress } from "@shared/schema";
 import { formatCurrency, formatDate, formatPercent, formatShortDate, buildWbsHierarchy } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle, CheckCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddWbsModal } from "./add-wbs-modal";
 import { EditWbsModal } from "./edit-wbs-modal";
@@ -60,6 +60,8 @@ interface TreeItemProps {
   onToggleExpand: (id: number) => void;
   budgetInfo: Record<number, { total: number, used: number, remaining: number }>;
   isBudgetFinalized: boolean;
+  loadingItems: Set<number>;
+  expandedItems: Record<number, boolean>;
 }
 
 // Interface for Project data
@@ -80,6 +82,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   const [selectedWbsItem, setSelectedWbsItem] = useState<WbsItem | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
+  const [loadingItems, setLoadingItems] = useState<Set<number>>(new Set());
   const [isFinalizingBudget, setIsFinalizingBudget] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -276,10 +279,41 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   });
 
   const toggleExpand = (itemId: number) => {
-    setExpandedItems(prev => ({
-      ...prev,
-      [itemId]: !prev[itemId]
-    }));
+    // If we're expanding, show the loading state
+    if (!expandedItems[itemId]) {
+      // First set expanded state immediately for responsiveness
+      setExpandedItems(prev => ({
+        ...prev,
+        [itemId]: true
+      }));
+      
+      // Then add this item to loading set
+      setLoadingItems(prev => {
+        const newSet = new Set(prev);
+        newSet.add(itemId);
+        return newSet;
+      });
+      
+      // Adaptive loading time based on number of children
+      const item = wbsItems.find(wi => wi.id === itemId);
+      const childCount = item ? wbsItems.filter(child => child.parentId === itemId).length : 0;
+      const loadingTime = Math.min(200 + childCount * 20, 500); // Base 200ms + 20ms per child, max 500ms
+      
+      // Simulate loading time
+      setTimeout(() => {
+        setLoadingItems(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(itemId);
+          return newSet;
+        });
+      }, loadingTime);
+    } else {
+      // If collapsing, no need for loading state - just collapse immediately
+      setExpandedItems(prev => ({
+        ...prev,
+        [itemId]: false
+      }));
+    }
   };
 
   const handleAddChild = (parentId: number) => {
@@ -366,6 +400,8 @@ export function WbsTree({ projectId }: WbsTreeProps) {
         onToggleExpand={toggleExpand}
         budgetInfo={budgetInfo}
         isBudgetFinalized={isBudgetFinalized}
+        loadingItems={loadingItems}
+        expandedItems={expandedItems}
       />
     ));
   };
@@ -600,7 +636,9 @@ function TreeItem({
   isExpanded,
   onToggleExpand,
   budgetInfo,
-  isBudgetFinalized
+  isBudgetFinalized,
+  loadingItems,
+  expandedItems
 }: TreeItemProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
@@ -612,6 +650,7 @@ function TreeItem({
   
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const isLoading = loadingItems.has(item.id);
 
   // Fetch project data to get the currency
   const { data: project } = useQuery<ProjectData>({
@@ -756,18 +795,25 @@ function TreeItem({
     <>
       <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 hover:bg-gray-50 border-b border-gray-100">
         <div className="flex items-center">
-          <button
-            type="button"
-            className={`mr-1 ${item.type === "Summary" ? 'opacity-100' : 'opacity-0'}`}
-            onClick={toggleExpand}
-            disabled={item.type !== "Summary"}
-          >
-            {isExpanded ? (
-              <ChevronDown className="h-4 w-4 text-gray-500" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-gray-500" />
-            )}
-          </button>
+          {item.type === "Summary" && (
+            <button
+              type="button"
+              className="mr-1 h-5 w-5 flex items-center justify-center"
+              onClick={toggleExpand}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+              ) : isExpanded ? (
+                <ChevronDown className="h-4 w-4 text-gray-500" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-gray-500" />
+              )}
+            </button>
+          )}
+          {item.type !== "Summary" && (
+            <div className="mr-1 h-5 w-5"></div>
+          )}
           
           <div className="ml-1" style={{ marginLeft: `${level * 16}px` }}>
             <div className={`font-medium text-sm ${
@@ -909,28 +955,61 @@ function TreeItem({
         </div>
       </div>
       
-      {isExpanded && (
-        <div className="divide-y divide-gray-100">
-          {childItems.map((child) => (
-            <TreeItem
-              key={child.id}
-              item={child}
-              projectId={projectId}
-              level={level + 1}
-              onAddChild={onAddChild}
-              onRefresh={onRefresh}
-              onUpdateProgress={onUpdateProgress}
-              onEdit={onEdit}
-              isExpanded={false}
-              onToggleExpand={onToggleExpand}
-              budgetInfo={budgetInfo}
-              isBudgetFinalized={isBudgetFinalized}
-            />
-          ))}
-          
-          {childItems.length === 0 && (
-            <div className="text-sm text-gray-500 py-2 px-4 pl-12" style={{ paddingLeft: `${(level + 2) * 16 + 24}px` }}>
-              No child items found. Click the + button to add one.
+      {/* Child items with smooth transitions */}
+      {isExpanded && childItems && (
+        <div className="transition-all duration-300 ease-in-out overflow-hidden"
+             style={{ 
+               opacity: isLoading ? 0 : 1,
+               maxHeight: isLoading ? '80px' : '2000px', // Allow space for skeleton while loading
+               transform: isLoading ? 'translateY(-8px)' : 'translateY(0)'
+             }}>
+          {isLoading ? (
+            <div className="py-2 ml-8 animate-pulse">
+              <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 border-b border-gray-100">
+                <Skeleton className="h-6 w-full ml-4" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+              <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 border-b border-gray-100">
+                <Skeleton className="h-6 w-full ml-4" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+            </div>
+          ) : (
+            <div className="animate-fadeIn">
+              {childItems.length > 0 ? (
+                childItems.map(childItem => (
+                  <TreeItem
+                    key={childItem.id}
+                    item={childItem}
+                    projectId={projectId}
+                    level={level + 1}
+                    onAddChild={onAddChild}
+                    onRefresh={onRefresh}
+                    onUpdateProgress={onUpdateProgress}
+                    onEdit={onEdit}
+                    isExpanded={isExpanded && !!expandedItems?.[childItem.id]}
+                    onToggleExpand={onToggleExpand}
+                    budgetInfo={budgetInfo}
+                    isBudgetFinalized={isBudgetFinalized}
+                    loadingItems={loadingItems}
+                    expandedItems={expandedItems}
+                  />
+                ))
+              ) : (
+                <div className="text-sm text-gray-500 py-2 px-4 pl-12" style={{ paddingLeft: `${(level + 2) * 16 + 24}px` }}>
+                  No child items found. Click the + button to add one.
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { WbsItem, Dependency } from "@shared/schema";
 import { formatShortDate, calculateDependencyConstraints } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Calendar, PlusCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, PlusCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -28,6 +28,7 @@ interface GanttItemProps {
   expandedItems?: Record<number, boolean>;
   onAddActivity?: (parentId: number) => void;
   isBudgetFinalized?: boolean;
+  loadingItems: Set<number>;
 }
 
 // Helper function to format percentage
@@ -41,6 +42,7 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
   const [timeScale, setTimeScale] = useState<"weeks" | "months">("months");
   const debuggedItems = useRef(false);
   const itemsDataVersion = useRef<string>("");
+  const [loadingItems, setLoadingItems] = useState<Set<number>>(new Set());
   
   // Fetch WBS items for the project
   const { data: wbsItems = [], isLoading: isLoadingWbs } = useQuery<WbsItem[]>({
@@ -233,12 +235,43 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
     return headers;
   }, [startDate, endDate, timeScale]);
 
-  // Handle expand/collapse
+  // Handle expand/collapse with loading indicator
   const toggleExpand = (itemId: number) => {
-    setExpandedItems(prev => ({
-      ...prev,
-      [itemId]: !prev[itemId]
-    }));
+    // If we're expanding, show the loading state
+    if (!expandedItems[itemId]) {
+      // First set expanded state immediately for responsiveness
+      setExpandedItems(prev => ({
+        ...prev,
+        [itemId]: true
+      }));
+      
+      // Then add this item to loading set
+      setLoadingItems(prev => {
+        const newSet = new Set(prev);
+        newSet.add(itemId);
+        return newSet;
+      });
+      
+      // Adaptive loading time based on number of children
+      const item = wbsItems.find(wi => wi.id === itemId);
+      const childCount = item ? wbsItems.filter(child => child.parentId === itemId).length : 0;
+      const loadingTime = Math.min(200 + childCount * 20, 500); // Base 200ms + 20ms per child, max 500ms
+      
+      // Simulate loading time
+      setTimeout(() => {
+        setLoadingItems(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(itemId);
+          return newSet;
+        });
+      }, loadingTime);
+    } else {
+      // If collapsing, no need for loading state - just collapse immediately
+      setExpandedItems(prev => ({
+        ...prev,
+        [itemId]: false
+      }));
+    }
   };
 
   // Expand all
@@ -358,6 +391,7 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
         renderedItems.add(item.id);
         
         const isExpanded = !!expandedItems[item.id];
+        const isLoading = loadingItems.has(item.id);
         
         result.push(
           <div key={item.id}>
@@ -371,11 +405,27 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
               expandedItems={expandedItems}
               onAddActivity={onAddActivity}
               isBudgetFinalized={isBudgetFinalized}
+              loadingItems={loadingItems}
             />
             
-            {isExpanded && item.children?.length > 0 && (
-              <div>
-                {renderWbsItems(item.children, level + 1, renderedItems)}
+            {isExpanded && (
+              <div className="transition-all duration-300 ease-in-out overflow-hidden"
+                   style={{ 
+                     opacity: isLoading ? 0 : 1,
+                     maxHeight: isLoading ? '80px' : '2000px', // Allow space for skeleton while loading
+                     transform: isLoading ? 'translateY(-8px)' : 'translateY(0)'
+                   }}>
+                {isLoading ? (
+                  <div className="py-2 ml-8 animate-pulse">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full mt-1" />
+                  </div>
+                ) : (
+                  item.children?.length > 0 && 
+                  <div className="animate-fadeIn">
+                    {renderWbsItems(item.children, level + 1, renderedItems)}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -492,9 +542,11 @@ function GanttItem({
   onToggleExpand,
   expandedItems = {},
   onAddActivity,
-  isBudgetFinalized
+  isBudgetFinalized,
+  loadingItems
 }: GanttItemProps) {
   const hasChildren = item.children && item.children.length > 0;
+  const isLoading = loadingItems.has(item.id);
 
   // Calculate position and width for the activity bar
   const calculatePosition = () => {
@@ -546,9 +598,12 @@ function GanttItem({
             <button
               type="button"
               onClick={() => onToggleExpand(item.id)}
-              className="mr-1 text-gray-500"
+              className="mr-1 text-gray-500 h-5 w-5 flex items-center justify-center"
+              disabled={isLoading}
             >
-              {isExpanded ? (
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+              ) : isExpanded ? (
                 <ChevronDown className="h-4 w-4" />
               ) : (
                 <ChevronRight className="h-4 w-4" />
