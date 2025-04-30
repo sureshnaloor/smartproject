@@ -293,68 +293,83 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Parent WBS</FormLabel>
-                  <Select
-                    value={field.value?.toString() || "none"}
-                    onValueChange={(value) => {
-                      const newParentId = value === "none" ? null : parseInt(value);
-                      field.onChange(newParentId);
-                      
-                      // Update level and code when parent changes
-                      const parent = newParentId ? wbsItems.find(item => item.id === newParentId) : null;
-                      const newLevel = parent ? parent.level + 1 : 1;
-                      form.setValue("level", newLevel);
-                      
-                      // Calculate new code
-                      const siblings = wbsItems.filter(item => item.parentId === newParentId);
-                      const newCode = parent 
-                        ? `${parent.code}.${siblings.length + 1}`
-                        : `${wbsItems.filter(item => !item.parentId).length + 1}`;
-                      form.setValue("code", newCode);
+                  {parentId ? (
+                    // When parentId is provided, show a read-only display of the parent WBS
+                    <div className="flex flex-col space-y-1.5">
+                      <div className="flex h-10 w-full rounded-md border border-input bg-gray-100 px-3 py-2 text-sm">
+                        {parentItem ? `${parentItem.code} - ${parentItem.name} (${parentItem.type})` : "Loading..."}
+                      </div>
+                      <FormDescription>
+                        This item will be created under the selected parent.
+                      </FormDescription>
+                    </div>
+                  ) : (
+                    // When no parentId, show the dropdown for selecting a parent
+                    <>
+                      <Select
+                        value={field.value?.toString() || "none"}
+                        onValueChange={(value) => {
+                          const newParentId = value === "none" ? null : parseInt(value);
+                          field.onChange(newParentId);
+                          
+                          // Update level and code when parent changes
+                          const parent = newParentId ? wbsItems.find(item => item.id === newParentId) : null;
+                          const newLevel = parent ? parent.level + 1 : 1;
+                          form.setValue("level", newLevel);
+                          
+                          // Calculate new code
+                          const siblings = wbsItems.filter(item => item.parentId === newParentId);
+                          const newCode = parent 
+                            ? `${parent.code}.${siblings.length + 1}`
+                            : `${wbsItems.filter(item => !item.parentId).length + 1}`;
+                          form.setValue("code", newCode);
 
-                      // Set isTopLevel flag
-                      form.setValue("isTopLevel", !newParentId);
+                          // Set isTopLevel flag
+                          form.setValue("isTopLevel", !newParentId);
 
-                      // Update type based on parent
-                      if (!newParentId) {
-                        // Top-level items can only be Summary
-                        form.setValue("type", "Summary");
-                      } else if (parent?.type === "Summary") {
-                        // Under Summary, default to WorkPackage
-                        form.setValue("type", "WorkPackage");
-                      } else if (parent?.type === "WorkPackage") {
-                        // Under WorkPackage, can only be Activity
-                        form.setValue("type", "Activity");
-                      }
-                      
-                      // Force a re-render of the allowed types
-                      setTimeout(() => {
-                        if (!newParentId) {
-                          setAllowedTypes(["Summary"]);
-                        } else if (parent?.type === "Summary") {
-                          setAllowedTypes(["WorkPackage"]);
-                        } else if (parent?.type === "WorkPackage") {
-                          setAllowedTypes(["Activity"]);
-                        }
-                      }, 0);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a parent WBS item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No Parent (Top Level)</SelectItem>
-                      {wbsItems
-                        .filter(item => item.type !== "Activity") // Activities can't have children
-                        .map((item) => (
-                          <SelectItem key={item.id} value={item.id.toString()}>
-                            {item.code} - {item.name} ({item.type})
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Select the parent WBS item. Leave empty for top-level items.
-                  </FormDescription>
+                          // Update type based on parent
+                          if (!newParentId) {
+                            // Top-level items can only be Summary
+                            form.setValue("type", "Summary");
+                          } else if (parent?.type === "Summary") {
+                            // Under Summary, default to WorkPackage
+                            form.setValue("type", "WorkPackage");
+                          } else if (parent?.type === "WorkPackage") {
+                            // Under WorkPackage, can only be Activity
+                            form.setValue("type", "Activity");
+                          }
+                          
+                          // Force a re-render of the allowed types
+                          setTimeout(() => {
+                            if (!newParentId) {
+                              setAllowedTypes(["Summary"]);
+                            } else if (parent?.type === "Summary") {
+                              setAllowedTypes(["WorkPackage"]);
+                            } else if (parent?.type === "WorkPackage") {
+                              setAllowedTypes(["Activity"]);
+                            }
+                          }, 0);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a parent WBS item" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No Parent (Top Level)</SelectItem>
+                          {wbsItems
+                            .filter(item => item.type !== "Activity") // Activities can't have children
+                            .map((item) => (
+                              <SelectItem key={item.id} value={item.id.toString()}>
+                                {item.code} - {item.name} ({item.type})
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Select the parent WBS item. Leave empty for top-level items.
+                      </FormDescription>
+                    </>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
