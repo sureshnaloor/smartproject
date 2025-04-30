@@ -409,7 +409,15 @@ export function WbsTree({ projectId }: WbsTreeProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold">Work Breakdown Structure</h2>
+        <div className="flex items-center">
+          <h2 className="text-lg font-semibold">Work Breakdown Structure</h2>
+          {isBudgetFinalized && (
+            <span className="ml-3 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full flex items-center">
+              <CheckCircle className="h-3.5 w-3.5 mr-1" />
+              Budget Finalized
+            </span>
+          )}
+        </div>
         <div className="flex space-x-2">
           <Button 
             variant="outline" 
@@ -471,7 +479,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                 <div>
                   <div className="text-xs text-gray-500">Work Package Budget Total</div>
                   <div className="text-base font-bold">{formatCurrency(budgetUsage.workPackageTotal, projectCurrency)}</div>
-                  {budgetUsage.workPackageTotal !== budgetUsage.topLevelAllocated && (
+                  {budgetUsage.workPackageTotal !== budgetUsage.topLevelAllocated && !isBudgetFinalized && (
                     <div className="text-xs text-amber-600 flex items-center">
                       <AlertCircle className="h-3 w-3 mr-1" />
                       {budgetUsage.workPackageTotal > budgetUsage.topLevelAllocated ? 
@@ -481,7 +489,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                     </div>
                   )}
                   {isBudgetFinalized && (
-                    <div className="text-xs text-green-600 flex items-center">
+                    <div className="text-xs text-green-600 flex items-center font-medium">
                       <CheckCircle className="h-3 w-3 mr-1" />
                       Budget finalized
                     </div>
@@ -522,7 +530,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                   <div>Budget</div>
                   <div>Actual Cost</div>
                   <div>Progress</div>
-                  <div>Actions</div>
+                  <div className={isBudgetFinalized ? "invisible" : ""}>Actions</div>
                 </div>
                 {/* Tree Items */}
                 <div className="space-y-0">
@@ -867,9 +875,8 @@ function TreeItem({
         
         <div className="flex space-x-1">
           {isBudgetFinalized ? (
-            <span className="text-xs text-green-600 flex items-center">
-              <CheckCircle className="h-4 w-4 mr-1" />
-              Finalized
+            <span className="invisible">
+              {/* Keep empty space for layout consistency but make it invisible */}
             </span>
           ) : (
             <>
