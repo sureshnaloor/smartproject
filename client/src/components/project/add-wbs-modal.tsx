@@ -45,9 +45,10 @@ interface AddWbsModalProps {
   projectId: number;
   parentId?: number | null;
   onSuccess?: () => void;
+  scheduleView?: boolean; // Flag for schedule view to only allow Activity type
 }
 
-export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuccess }: AddWbsModalProps) {
+export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuccess, scheduleView = false }: AddWbsModalProps) {
   const [showDuration, setShowDuration] = useState(true);
   const [allowedTypes, setAllowedTypes] = useState<string[]>(["Summary"]);
   const { toast } = useToast();
@@ -135,33 +136,31 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
   useEffect(() => {
     let newAllowedTypes: string[] = ["Summary"];
     
-    if (!parentId) {
+    // In schedule view, we only allow Activity type
+    if (scheduleView) {
+      newAllowedTypes = ["Activity"];
+      form.setValue("type", "Activity");
+    } else if (!parentId) {
       // Top-level items can only be Summary
       newAllowedTypes = ["Summary"];
+      form.setValue("type", "Summary");
     } else if (parentItem?.type === "Summary") {
       // Under Summary, can ONLY be WorkPackage (no longer allowing Summary)
       newAllowedTypes = ["WorkPackage"];
-    } else if (parentItem?.type === "WorkPackage") {
-      // Under WorkPackage, can only be Activity
-      newAllowedTypes = ["Activity"];
-    }
-    
-    setAllowedTypes(newAllowedTypes);
-    
-    // Set default type based on parent
-    if (!parentId) {
-      form.setValue("type", "Summary");
-    } else if (parentItem?.type === "Summary") {
       form.setValue("type", "WorkPackage");
       // Set default budget to remaining budget of parent if adding a WorkPackage
       if (remainingBudget > 0) {
         form.setValue("budgetedCost", remainingBudget);
       }
     } else if (parentItem?.type === "WorkPackage") {
+      // Under WorkPackage, can only be Activity
+      newAllowedTypes = ["Activity"];
       form.setValue("type", "Activity");
     }
     
-  }, [parentId, parentItem, form, remainingBudget]);
+    setAllowedTypes(newAllowedTypes);
+    
+  }, [parentId, parentItem, form, remainingBudget, scheduleView]);
 
   // Get form values
   const { startDate, endDate, duration, type } = form.watch();
@@ -279,86 +278,93 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add New WBS Item</DialogTitle>
+          <DialogTitle>
+            {scheduleView ? "Add Activity" : "Add New WBS Item"}
+          </DialogTitle>
           <DialogDescription>
-            Create a new work breakdown structure item for your project.
+            {scheduleView 
+              ? "Create a new activity for this work package." 
+              : "Create a new work breakdown structure item for your project."}
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <FormField
-              control={form.control}
-              name="parentId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Parent WBS</FormLabel>
-                  <Select
-                    value={field.value?.toString() || "none"}
-                    onValueChange={(value) => {
-                      const newParentId = value === "none" ? null : parseInt(value);
-                      field.onChange(newParentId);
-                      
-                      // Update level and code when parent changes
-                      const parent = newParentId ? wbsItems.find(item => item.id === newParentId) : null;
-                      const newLevel = parent ? parent.level + 1 : 1;
-                      form.setValue("level", newLevel);
-                      
-                      // Calculate new code
-                      const siblings = wbsItems.filter(item => item.parentId === newParentId);
-                      const newCode = parent 
-                        ? `${parent.code}.${siblings.length + 1}`
-                        : `${wbsItems.filter(item => !item.parentId).length + 1}`;
-                      form.setValue("code", newCode);
+            {/* Only show parent selection if not in schedule view */}
+            {!scheduleView && (
+              <FormField
+                control={form.control}
+                name="parentId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Parent WBS</FormLabel>
+                    <Select
+                      value={field.value?.toString() || "none"}
+                      onValueChange={(value) => {
+                        const newParentId = value === "none" ? null : parseInt(value);
+                        field.onChange(newParentId);
+                        
+                        // Update level and code when parent changes
+                        const parent = newParentId ? wbsItems.find(item => item.id === newParentId) : null;
+                        const newLevel = parent ? parent.level + 1 : 1;
+                        form.setValue("level", newLevel);
+                        
+                        // Calculate new code
+                        const siblings = wbsItems.filter(item => item.parentId === newParentId);
+                        const newCode = parent 
+                          ? `${parent.code}.${siblings.length + 1}`
+                          : `${wbsItems.filter(item => !item.parentId).length + 1}`;
+                        form.setValue("code", newCode);
 
-                      // Set isTopLevel flag
-                      form.setValue("isTopLevel", !newParentId);
+                        // Set isTopLevel flag
+                        form.setValue("isTopLevel", !newParentId);
 
-                      // Update type based on parent
-                      if (!newParentId) {
-                        // Top-level items can only be Summary
-                        form.setValue("type", "Summary");
-                      } else if (parent?.type === "Summary") {
-                        // Under Summary, default to WorkPackage
-                        form.setValue("type", "WorkPackage");
-                      } else if (parent?.type === "WorkPackage") {
-                        // Under WorkPackage, can only be Activity
-                        form.setValue("type", "Activity");
-                      }
-                      
-                      // Force a re-render of the allowed types
-                      setTimeout(() => {
+                        // Update type based on parent
                         if (!newParentId) {
-                          setAllowedTypes(["Summary"]);
+                          // Top-level items can only be Summary
+                          form.setValue("type", "Summary");
                         } else if (parent?.type === "Summary") {
-                          setAllowedTypes(["WorkPackage"]);
+                          // Under Summary, default to WorkPackage
+                          form.setValue("type", "WorkPackage");
                         } else if (parent?.type === "WorkPackage") {
-                          setAllowedTypes(["Activity"]);
+                          // Under WorkPackage, can only be Activity
+                          form.setValue("type", "Activity");
                         }
-                      }, 0);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a parent WBS item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No Parent (Top Level)</SelectItem>
-                      {wbsItems
-                        .filter(item => item.type !== "Activity") // Activities can't have children
-                        .map((item) => (
-                          <SelectItem key={item.id} value={item.id.toString()}>
-                            {item.code} - {item.name} ({item.type})
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Select the parent WBS item. Leave empty for top-level items.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                        
+                        // Force a re-render of the allowed types
+                        setTimeout(() => {
+                          if (!newParentId) {
+                            setAllowedTypes(["Summary"]);
+                          } else if (parent?.type === "Summary") {
+                            setAllowedTypes(["WorkPackage"]);
+                          } else if (parent?.type === "WorkPackage") {
+                            setAllowedTypes(["Activity"]);
+                          }
+                        }, 0);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a parent WBS item" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Parent (Top Level)</SelectItem>
+                        {wbsItems
+                          .filter(item => item.type !== "Activity") // Activities can't have children
+                          .map((item) => (
+                            <SelectItem key={item.id} value={item.id.toString()}>
+                              {item.code} - {item.name} ({item.type})
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Select the parent WBS item. Leave empty for top-level items.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
@@ -375,44 +381,71 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="type"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>WBS Type</FormLabel>
-                    <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      disabled={parentId === null || parentItem?.type === "WorkPackage"}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allowedTypes.includes("Summary") && (
-                          <SelectItem value="Summary">Summary</SelectItem>
-                        )}
-                        {allowedTypes.includes("WorkPackage") && (
-                          <SelectItem value="WorkPackage">Work Package</SelectItem>
-                        )}
-                        {allowedTypes.includes("Activity") && (
-                          <SelectItem value="Activity">Activity</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      {!parentId ? 
-                        "Top-level items can only be Summary type" : 
-                        parentItem?.type === "WorkPackage" ? 
-                          "WorkPackage items can only have Activity children" :
-                          "Summary items can only have WorkPackage children"
-                      }
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {/* Only show type selection if not in schedule view mode */}
+              {!scheduleView && (
+                <FormField
+                  control={form.control}
+                  name="type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>WBS Type</FormLabel>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={parentId === null || parentItem?.type === "WorkPackage"}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allowedTypes.includes("Summary") && (
+                            <SelectItem value="Summary">Summary</SelectItem>
+                          )}
+                          {allowedTypes.includes("WorkPackage") && (
+                            <SelectItem value="WorkPackage">Work Package</SelectItem>
+                          )}
+                          {allowedTypes.includes("Activity") && (
+                            <SelectItem value="Activity">Activity</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {!parentId ? 
+                          "Top-level items can only be Summary type" : 
+                          parentItem?.type === "WorkPackage" ? 
+                            "WorkPackage items can only have Activity children" :
+                            "Summary items can only have WorkPackage children"
+                        }
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              
+              {/* If in schedule view, show date fields in the grid */}
+              {scheduleView && (
+                <FormField
+                  control={form.control}
+                  name="startDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Start Date</FormLabel>
+                      <FormControl>
+                        <DatePicker
+                          date={field.value}
+                          setDate={(date) => {
+                            if (date) {
+                              updateDatesAndDuration('startDate', date);
+                            }
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -481,27 +514,6 @@ export function AddWbsModal({ isOpen, onClose, projectId, parentId = null, onSuc
             {/* Only show date fields for Activity type */}
             {type === "Activity" && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <FormField
-                  control={form.control}
-                  name="startDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Start Date</FormLabel>
-                      <FormControl>
-                        <DatePicker
-                          date={field.value}
-                          setDate={(date) => {
-                            if (date) {
-                              updateDatesAndDuration('startDate', date);
-                            }
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
                 {showDuration ? (
                   <FormField
                     control={form.control}

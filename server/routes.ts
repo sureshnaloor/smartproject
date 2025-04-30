@@ -917,7 +917,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             wbsItemsByCode.set(result.code, result);
           }
         } catch (error) {
-          errors.push(`Row ${i + 1}: Failed to process WBS item - ${error.message}`);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push(`Row ${i + 1}: Failed to process WBS item - ${errorMessage}`);
         }
       }
       
@@ -938,6 +939,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (err) {
       console.error("Error importing WBS items:", err);
+      handleError(err, res);
+    }
+  });
+
+  // Add endpoint to get all dependencies for a project
+  app.get("/api/projects/:projectId/dependencies", async (req: Request, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ message: "Invalid project ID" });
+      }
+
+      // Use the new method to get all dependencies for the project directly
+      const dependencies = await storage.getProjectDependencies(projectId);
+      res.json(dependencies);
+    } catch (err: unknown) {
       handleError(err, res);
     }
   });

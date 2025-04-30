@@ -14,7 +14,7 @@ import {
   costEntries,
 } from "@shared/schema";
 import { db } from "./db";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, inArray } from "drizzle-orm";
 
 // Storage interface
 export interface IStorage {
@@ -35,6 +35,7 @@ export interface IStorage {
 
   // Dependency methods
   getDependencies(wbsItemId: number): Promise<Dependency[]>;
+  getProjectDependencies(projectId: number): Promise<Dependency[]>;
   createDependency(dependency: InsertDependency): Promise<Dependency>;
   deleteDependency(predecessorId: number, successorId: number): Promise<boolean>;
 
@@ -140,6 +141,28 @@ export class DatabaseStorage implements IStorage {
           eq(dependencies.successorId, wbsItemId)
         )
       );
+  }
+
+  async getProjectDependencies(projectId: number): Promise<Dependency[]> {
+    // First get all WBS items for this project
+    const wbsItems = await this.getWbsItems(projectId);
+    if (!wbsItems.length) return [];
+    
+    // Extract all WBS item IDs
+    const wbsItemIds = wbsItems.map(item => item.id);
+    
+    // Find all dependencies where either predecessor or successor belongs to this project
+    const result = await db
+      .select()
+      .from(dependencies)
+      .where(
+        or(
+          inArray(dependencies.predecessorId, wbsItemIds),
+          inArray(dependencies.successorId, wbsItemIds)
+        )
+      );
+      
+    return result;
   }
 
   async createDependency(dependency: InsertDependency): Promise<Dependency> {

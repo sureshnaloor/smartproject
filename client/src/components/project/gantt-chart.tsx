@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { WbsItem, Dependency } from "@shared/schema";
 import { formatShortDate, calculateDependencyConstraints } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Calendar } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, PlusCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -15,6 +15,7 @@ import {
 
 interface GanttChartProps {
   projectId: number;
+  onAddActivity?: (parentId: number) => void;
 }
 
 interface GanttItemProps {
@@ -25,6 +26,8 @@ interface GanttItemProps {
   isExpanded: boolean;
   onToggleExpand: (id: number) => void;
   expandedItems?: Record<number, boolean>;
+  onAddActivity?: (parentId: number) => void;
+  isBudgetFinalized?: boolean;
 }
 
 // Helper function to format percentage
@@ -33,18 +36,60 @@ const formatPercent = (value: number | string | null | undefined): string => {
   return `${Math.round(Number(value))}%`;
 };
 
-export function GanttChart({ projectId }: GanttChartProps) {
+export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
   const [timeScale, setTimeScale] = useState<"weeks" | "months">("months");
+  const debuggedItems = useRef(false);
+  const itemsDataVersion = useRef<string>("");
   
   // Fetch WBS items for the project
   const { data: wbsItems = [], isLoading: isLoadingWbs } = useQuery<WbsItem[]>({
     queryKey: [`/api/projects/${projectId}/wbs`],
   });
 
+  // DEBUG: Check for duplicate items by ID, but only once per data change
+  useEffect(() => {
+    // Create a data version string to track changes
+    const currentVersion = JSON.stringify(wbsItems.map(item => item.id).sort());
+    
+    // Skip if we've already debugged this exact set of items
+    if (debuggedItems.current && currentVersion === itemsDataVersion.current) return;
+    
+    debuggedItems.current = true;
+    itemsDataVersion.current = currentVersion;
+    
+    // Create a map of ID occurrences
+    const idCount = new Map<number, number>();
+    wbsItems.forEach(item => {
+      const count = idCount.get(item.id) || 0;
+      idCount.set(item.id, count + 1);
+    });
+    
+    // Find any IDs that appear more than once
+    const duplicates = Array.from(idCount.entries())
+      .filter(([id, count]) => count > 1)
+      .map(([id, count]) => {
+        const items = wbsItems.filter(item => item.id === id);
+        return { id, count, items };
+      });
+    
+    if (duplicates.length > 0) {
+      console.warn('Duplicate WBS items detected in gantt-chart.tsx:', duplicates);
+    }
+    
+    // Reset debugged flag when component unmounts
+    return () => {
+      debuggedItems.current = false;
+    };
+  }, [wbsItems]);
+
   // Initialize all top-level items as expanded
   useEffect(() => {
     const topLevelItems = wbsItems.filter(item => item.isTopLevel);
+    
+    // Skip if no top level items or we've already set them
+    if (topLevelItems.length === 0 || Object.keys(expandedItems).length > 0) return;
+    
     const initialExpanded: Record<number, boolean> = {};
     
     topLevelItems.forEach(item => {
@@ -55,31 +100,64 @@ export function GanttChart({ projectId }: GanttChartProps) {
       ...prev,
       ...initialExpanded
     }));
-  }, [wbsItems]);
+  }, [wbsItems, expandedItems]);
 
-  // Fetch dependencies
-  const fetchDependenciesForItems = async () => {
-    const allDependencies: Dependency[] = [];
+  // Create a custom fetch function for dependencies
+  const fetchDependencies = async () => {
+    // Skip if no WBS items
+    if (!wbsItems || wbsItems.length === 0) return [];
     
-    // Only Activity items can have dependencies
-    const activityItems = wbsItems.filter(item => item.type === "Activity");
-    
-    for (const item of activityItems) {
-      const response = await fetch(`/api/wbs/${item.id}/dependencies`, {
+    try {
+      // Use a specific endpoint to get all dependencies for this project
+      const response = await fetch(`/api/projects/${projectId}/dependencies`, {
         credentials: "include",
       });
+      
       if (response.ok) {
-        const deps = await response.json();
-        allDependencies.push(...deps);
+        const data = await response.json();
+        return data;
+      } else {
+        console.warn("Failed to fetch dependencies from project endpoint, falling back to per-activity approach");
+        throw new Error("Failed to fetch from project endpoint");
       }
+    } catch (error) {
+      // Fallback to fetching individually if the project endpoint fails
+      console.log("Falling back to fetching dependencies for each activity");
+      
+      const activityItems = wbsItems.filter(item => item.type === "Activity");
+      const allDependencies: Dependency[] = [];
+      const uniqueKeys = new Set<string>();
+      
+      for (const item of activityItems) {
+        try {
+          const response = await fetch(`/api/wbs/${item.id}/dependencies`, {
+            credentials: "include",
+          });
+          
+          if (response.ok) {
+            const deps = await response.json();
+            // Only add dependencies we haven't seen before
+            deps.forEach((dep: Dependency) => {
+              const key = `${dep.predecessorId}-${dep.successorId}`;
+              if (!uniqueKeys.has(key)) {
+                uniqueKeys.add(key);
+                allDependencies.push(dep);
+              }
+            });
+          }
+        } catch (itemError) {
+          console.error(`Error fetching dependencies for item ${item.id}:`, itemError);
+        }
+      }
+      
+      return allDependencies;
     }
-    
-    return allDependencies;
   };
 
+  // Query for dependencies with the custom fetch function
   const { data: dependencies = [], isLoading: isLoadingDeps } = useQuery<Dependency[]>({
-    queryKey: [`/api/projects/${projectId}/dependencies`],
-    queryFn: fetchDependenciesForItems,
+    queryKey: [`dependencies-for-project-${projectId}`],
+    queryFn: fetchDependencies,
     enabled: wbsItems.length > 0,
   });
 
@@ -185,41 +263,103 @@ export function GanttChart({ projectId }: GanttChartProps) {
 
   // Create a hierarchical structure
   const hierarchicalItems = useMemo(() => {
+    if (!wbsItems.length) return [];
+    
+    // Track which items have already been added to any parent
+    const addedToParent = new Set<number>();
+    
+    // Map of items by id with empty children array
     const itemMap = new Map<number, WbsItem & { children: (WbsItem & { children: any[] })[] }>();
     
-    // Initialize with empty children array
+    // Initialize all items in the map
     wbsItems.forEach(item => {
       itemMap.set(item.id, { ...item, children: [] });
     });
     
-    // Build the hierarchy
+    // Root items array for top-level items
     const rootItems: (WbsItem & { children: any[] })[] = [];
     
-    itemMap.forEach(item => {
-      if (item.parentId === null) {
-        rootItems.push(item);
-      } else {
-        const parent = itemMap.get(item.parentId);
-        if (parent) {
-          parent.children.push(item);
-        }
+    // First, add root items (null parent)
+    wbsItems
+      .filter(item => item.parentId === null)
+      .forEach(item => {
+        rootItems.push(itemMap.get(item.id) as any);
+      });
+    
+    // Then, sort non-root items by level to ensure proper hierarchy
+    const nonRootItems = [...wbsItems]
+      .filter(item => item.parentId !== null)
+      .sort((a, b) => a.level - b.level);
+    
+    for (const item of nonRootItems) {
+      // Skip if already added to a parent
+      if (addedToParent.has(item.id)) continue;
+      
+      const parentId = item.parentId as number;
+      const parent = itemMap.get(parentId);
+      
+      if (parent) {
+        // Add this item to its parent's children array
+        parent.children.push(itemMap.get(item.id) as any);
+        // Mark as added to avoid duplicates
+        addedToParent.add(item.id);
       }
-    });
+    }
     
     return rootItems;
   }, [wbsItems]);
 
-  // Recursive function to render WBS items
+  // Query to check if budget is finalized
+  const { data: project } = useQuery<{ id: number; name: string; budget: number }>(
+    { queryKey: [`/api/projects/${projectId}`] }
+  );
+  
+  // Calculate if budget is finalized
+  const isBudgetFinalized = useMemo(() => {
+    if (!wbsItems.length) return false;
+    
+    // Get all top-level items (Summary type)
+    const topLevelItems = wbsItems.filter(item => item.isTopLevel && item.type === "Summary");
+    
+    // Sum up all top-level budgets
+    const totalAllocated = topLevelItems.reduce((total, item) => {
+      return total + Number(item.budgetedCost || 0);
+    }, 0);
+    
+    // Get all work packages
+    const workPackages = wbsItems.filter(item => item.type === "WorkPackage");
+    
+    // Sum up all work package budgets
+    const totalWorkPackageBudget = workPackages.reduce((total, wp) => {
+      return total + Number(wp.budgetedCost || 0);
+    }, 0);
+    
+    // Budget is finalized when the sums match and are greater than 0
+    return Math.abs(totalWorkPackageBudget - totalAllocated) < 0.01 && totalWorkPackageBudget > 0;
+  }, [wbsItems]);
+
+  // Recursive function to render WBS items with better duplicate handling
   const renderWbsItems = (
     items: (WbsItem & { children: any[] })[],
-    level = 0
+    level = 0,
+    renderedItems = new Set<number>()
   ): JSX.Element[] => {
-    return items
+    const result: JSX.Element[] = [];
+    
+    items
       .sort((a, b) => a.code.localeCompare(b.code))
-      .map(item => {
+      .forEach(item => {
+        // Skip if this item has already been rendered
+        if (renderedItems.has(item.id)) {
+          return;
+        }
+        
+        // Mark this item as rendered
+        renderedItems.add(item.id);
+        
         const isExpanded = !!expandedItems[item.id];
         
-        return (
+        result.push(
           <div key={item.id}>
             <GanttItem
               item={item}
@@ -229,16 +369,20 @@ export function GanttChart({ projectId }: GanttChartProps) {
               isExpanded={isExpanded}
               onToggleExpand={toggleExpand}
               expandedItems={expandedItems}
+              onAddActivity={onAddActivity}
+              isBudgetFinalized={isBudgetFinalized}
             />
             
-            {isExpanded && item.children.length > 0 && (
+            {isExpanded && item.children?.length > 0 && (
               <div>
-                {renderWbsItems(item.children, level + 1)}
+                {renderWbsItems(item.children, level + 1, renderedItems)}
               </div>
             )}
           </div>
         );
       });
+    
+    return result;
   };
 
   if (isLoadingWbs) {
@@ -346,7 +490,9 @@ function GanttItem({
   level,
   isExpanded,
   onToggleExpand,
-  expandedItems = {}
+  expandedItems = {},
+  onAddActivity,
+  isBudgetFinalized
 }: GanttItemProps) {
   const hasChildren = item.children && item.children.length > 0;
 
@@ -411,12 +557,25 @@ function GanttItem({
           ) : (
             <span className="w-5"></span>
           )}
-          <div className="ml-1">
-            <div className="text-sm font-medium">{item.name}</div>
-            {item.type === "Activity" && item.startDate && item.endDate && (
-              <div className="text-xs text-gray-500">
-                {formatShortDate(item.startDate)} - {formatShortDate(item.endDate)}
-              </div>
+          <div className="ml-1 flex items-center">
+            <div>
+              <div className="text-sm font-medium">{item.name}</div>
+              {item.type === "Activity" && item.startDate && item.endDate && (
+                <div className="text-xs text-gray-500">
+                  {formatShortDate(item.startDate)} - {formatShortDate(item.endDate)}
+                </div>
+              )}
+            </div>
+            {item.type === "WorkPackage" && onAddActivity && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 ml-2"
+                onClick={() => onAddActivity(item.id)}
+                title="Add Activity"
+              >
+                <PlusCircle className="h-4 w-4 text-blue-500" />
+              </Button>
             )}
           </div>
         </div>
@@ -443,23 +602,6 @@ function GanttItem({
           )}
         </div>
       </div>
-      
-      {isExpanded && hasChildren && item.children && (
-        <>
-          {item.children.map(child => (
-            <GanttItem
-              key={child.id}
-              item={child}
-              startDate={startDate}
-              totalDays={totalDays}
-              level={level + 1}
-              isExpanded={!!expandedItems[child.id]}
-              onToggleExpand={onToggleExpand}
-              expandedItems={expandedItems}
-            />
-          ))}
-        </>
-      )}
     </>
   );
 }

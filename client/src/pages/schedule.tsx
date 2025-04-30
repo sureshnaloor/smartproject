@@ -1,5 +1,5 @@
 import { useParams } from "wouter";
-import { useState } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, Dependency, InsertDependency } from "@shared/schema";
@@ -7,6 +7,7 @@ import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { GanttChart } from "@/components/project/gantt-chart";
+import { AddWbsModal } from "@/components/project/add-wbs-modal";
 import { formatDate, formatShortDate, isValidDependency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ColumnDef } from "@tanstack/react-table";
@@ -36,10 +37,13 @@ export default function Schedule() {
   const params = useParams();
   const projectId = parseInt(params.projectId);
   const [isAddDependencyModalOpen, setIsAddDependencyModalOpen] = useState(false);
+  const [isAddActivityModalOpen, setIsAddActivityModalOpen] = useState(false);
+  const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
   const [predecessorId, setPredecessorId] = useState<number | null>(null);
   const [successorId, setSuccessorId] = useState<number | null>(null);
   const [dependencyType, setDependencyType] = useState<string>("FS");
   const [lag, setLag] = useState<number>(0);
+  const debuggedItems = useRef(false);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -49,21 +53,101 @@ export default function Schedule() {
     queryKey: [`/api/projects/${projectId}/wbs`],
   });
 
+  // Find work package items (use a Set to ensure uniqueness by ID)
+  const workPackageItems = useMemo(() => {
+    const uniqueIds = new Set<number>();
+    return wbsItems
+      .filter(item => {
+        if (item.type === "WorkPackage" && !uniqueIds.has(item.id)) {
+          uniqueIds.add(item.id);
+          return true;
+        }
+        return false;
+      });
+  }, [wbsItems]);
+
+  // DEBUG: Check for duplicate items by ID, but only once per data change
+  useEffect(() => {
+    // Skip if we've already debugged this set of items
+    if (debuggedItems.current) return;
+    
+    // Create a map of ID occurrences
+    const idCount = new Map<number, number>();
+    wbsItems.forEach(item => {
+      const count = idCount.get(item.id) || 0;
+      idCount.set(item.id, count + 1);
+    });
+    
+    // Find any IDs that appear more than once
+    const duplicates = Array.from(idCount.entries())
+      .filter(([id, count]) => count > 1)
+      .map(([id, count]) => {
+        const items = wbsItems.filter(item => item.id === id);
+        return { id, count, items };
+      });
+    
+    if (duplicates.length > 0) {
+      console.warn('Duplicate WBS items detected in schedule.tsx:', duplicates);
+    }
+    
+    // Mark as debugged to prevent further checks on the same data
+    debuggedItems.current = true;
+    
+    // Reset debugged flag when component unmounts
+    return () => {
+      debuggedItems.current = false;
+    };
+  }, [wbsItems]);
+
   // Fetch dependencies
   const fetchDependenciesForItems = async () => {
-    const allDependencies: Dependency[] = [];
+    // Skip if no WBS items
+    if (!wbsItems.length) return [];
     
-    for (const item of wbsItems) {
-      const response = await fetch(`/api/wbs/${item.id}/dependencies`, {
+    try {
+      // Try to fetch all dependencies for the project at once
+      const response = await fetch(`/api/projects/${projectId}/dependencies`, {
         credentials: "include",
       });
+      
       if (response.ok) {
-        const deps = await response.json();
-        allDependencies.push(...deps);
+        return await response.json();
+      }
+    } catch (error) {
+      console.error("Error fetching all dependencies:", error);
+    }
+    
+    // Fallback to fetching by activity if project-wide endpoint doesn't exist
+    const allDependencies: Dependency[] = [];
+    const activityItems = wbsItems.filter(item => item.type === "Activity");
+    
+    for (const item of activityItems) {
+      try {
+        const response = await fetch(`/api/wbs/${item.id}/dependencies`, {
+          credentials: "include",
+        });
+        if (response.ok) {
+          const deps = await response.json();
+          allDependencies.push(...deps);
+        }
+      } catch (error) {
+        console.error(`Error fetching dependencies for item ${item.id}:`, error);
       }
     }
     
-    return allDependencies;
+    // Deduplicate dependencies
+    const uniqueDependenciesSet = new Set<string>();
+    const uniqueDependencies: Dependency[] = [];
+    
+    allDependencies.forEach(dep => {
+      const depString = `${dep.predecessorId}-${dep.successorId}`;
+      if (!uniqueDependenciesSet.has(depString)) {
+        uniqueDependenciesSet.add(depString);
+        uniqueDependencies.push(dep);
+      }
+    });
+    
+    return uniqueDependencies;
   };
 
   const { data: dependencies = [], isLoading: isLoadingDeps } = useQuery<Dependency[]>({
@@ -182,6 +266,11 @@ export default function Schedule() {
     deleteDependency.mutate({ predecessorId, successorId });
   };
 
+  const handleAddActivity = (parentId: number) => {
+    setSelectedParentId(parentId);
+    setIsAddActivityModalOpen(true);
+  };
+
   // Define columns for dependency table
   const columns: ColumnDef<Dependency>[] = [
     {
@@ -274,7 +363,31 @@ export default function Schedule() {
   return (
     <div className="flex-1 overflow-auto p-4 bg-gray-50 space-y-6">
       {/* Schedule Chart Section */}
-      <GanttChart projectId={projectId} />
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-center">
+            <CardTitle>Project Schedule</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <GanttChart projectId={projectId} onAddActivity={handleAddActivity} />
+        </CardContent>
+      </Card>
+      
+      {/* Add Activity Modal */}
+      {isAddActivityModalOpen && (
+        <AddWbsModal
+          projectId={projectId}
+          parentId={selectedParentId}
+          isOpen={isAddActivityModalOpen} 
+          onClose={() => setIsAddActivityModalOpen(false)}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/wbs`] });
+            setIsAddActivityModalOpen(false);
+          }}
+          scheduleView={true}
+        />
+      )}
       
       {/* Dependencies Section */}
       <Card>
@@ -315,7 +428,7 @@ export default function Schedule() {
                 </SelectTrigger>
                 <SelectContent>
                   {wbsItems
-                    .filter(item => item.type !== "Summary") // Typically dependencies are between activities/tasks
+                    .filter(item => item.type === "Activity") // Only activities can have dependencies
                     .map((item) => (
                       <SelectItem key={`pred-${item.id}`} value={item.id.toString()}>
                         {item.code} - {item.name}
@@ -370,7 +483,7 @@ export default function Schedule() {
                 </SelectTrigger>
                 <SelectContent>
                   {wbsItems
-                    .filter(item => item.type !== "Summary") // Typically dependencies are between activities/tasks
+                    .filter(item => item.type === "Activity") // Only activities can have dependencies 
                     .map((item) => (
                       <SelectItem key={`succ-${item.id}`} value={item.id.toString()}>
                         {item.code} - {item.name}
@@ -389,30 +502,11 @@ export default function Schedule() {
           </div>
           
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsAddDependencyModalOpen(false);
-                resetDependencyForm();
-              }}
-            >
+            <Button variant="outline" onClick={() => setIsAddDependencyModalOpen(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={handleAddDependency}
-              disabled={createDependency.isPending || !predecessorId || !successorId}
-            >
-              {createDependency.isPending ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Adding...
-                </>
-              ) : (
-                'Add Dependency'
-              )}
+            <Button onClick={handleAddDependency} disabled={createDependency.isPending}>
+              {createDependency.isPending ? 'Creating...' : 'Add Dependency'}
             </Button>
           </DialogFooter>
         </DialogContent>
