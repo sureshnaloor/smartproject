@@ -70,9 +70,9 @@ type FormValues = z.infer<typeof formSchema>;
 const downloadActivityTemplate = () => {
   const csvContent = [
     "activityCode,activityName,description,startDate,duration,endDate,percentComplete",
-    "1.1.1.1,Design Phase,Initial design activities,2024-01-01,10,,0",
-    "1.1.1.2,Development Phase,Implementation work,2024-01-15,,2024-01-30,0",
-    "1.1.1.3,Testing Phase,Quality assurance,2024-02-01,5,,0"
+    "1.1.1,Design Phase,Initial design activities,2024-01-01,10,,0",
+    "1.1.2,Development Phase,Implementation work,2024-01-15,,2024-01-30,0",
+    "1.1.3,Testing Phase,Quality assurance,2024-02-01,5,,0"
   ].join("\n");
 
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });

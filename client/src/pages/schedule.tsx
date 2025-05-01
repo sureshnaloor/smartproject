@@ -410,7 +410,15 @@ export default function Schedule() {
       </Card>
 
       {/* Add Dependency Modal */}
-      <Dialog open={isAddDependencyModalOpen} onOpenChange={setIsAddDependencyModalOpen}>
+      <Dialog 
+        open={isAddDependencyModalOpen} 
+        onOpenChange={(open) => {
+          if (!open) {
+            resetDependencyForm();
+          }
+          setIsAddDependencyModalOpen(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Dependency</DialogTitle>
@@ -483,7 +491,7 @@ export default function Schedule() {
                 </SelectTrigger>
                 <SelectContent>
                   {wbsItems
-                    .filter(item => item.type === "Activity") // Only activities can have dependencies 
+                    .filter(item => item.type === "Activity" && item.id !== predecessorId) // Filter out the selected predecessor
                     .map((item) => (
                       <SelectItem key={`succ-${item.id}`} value={item.id.toString()}>
                         {item.code} - {item.name}
