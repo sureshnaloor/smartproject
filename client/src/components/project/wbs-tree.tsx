@@ -44,6 +44,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ImportActivityModal } from "./import-activity-modal";
+import { ImportWbsModal } from "./import-wbs-modal";
 
 interface WbsTreeProps {
   projectId: number;
@@ -80,8 +81,11 @@ interface ProjectData {
 export function WbsTree({ projectId }: WbsTreeProps) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isImportWbsModalOpen, setIsImportWbsModalOpen] = useState(false);
+  const [isImportActivityModalOpen, setIsImportActivityModalOpen] = useState(false);
   const [selectedWbsItem, setSelectedWbsItem] = useState<WbsItem | null>(null);
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
+  const [selectedWorkPackageId, setSelectedWorkPackageId] = useState<number | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
   const [loadingItems, setLoadingItems] = useState<Set<number>>(new Set());
   const [isFinalizingBudget, setIsFinalizingBudget] = useState(false);
@@ -432,6 +436,28 @@ export function WbsTree({ projectId }: WbsTreeProps) {
           <Button 
             variant="outline" 
             size="sm"
+            onClick={() => setIsImportWbsModalOpen(true)}
+            disabled={isLoading || isBudgetFinalized}
+          >
+            <FileUp className="h-4 w-4 mr-1" />
+            Import WBS
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => {
+              // Open the global import activities modal
+              setSelectedWorkPackageId(null);
+              setIsImportActivityModalOpen(true);
+            }}
+            disabled={isLoading}
+          >
+            <FileUp className="h-4 w-4 mr-1" />
+            Import Activities
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm"
             onClick={() => setIsFinalizingBudget(true)}
             disabled={isLoading || isBudgetFinalized || wbsItems.length === 0}
           >
@@ -531,7 +557,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                   <div>Budget</div>
                   <div>Actual Cost</div>
                   <div>Progress</div>
-                  <div className={isBudgetFinalized ? "invisible" : ""}>Actions</div>
+                  <div>Actions</div>
                 </div>
                 {/* Tree Items */}
                 <div className="space-y-0">
@@ -567,6 +593,21 @@ export function WbsTree({ projectId }: WbsTreeProps) {
           }}
         />
       )}
+
+      {/* Import WBS Modal */}
+      <ImportWbsModal
+        isOpen={isImportWbsModalOpen}
+        onClose={() => setIsImportWbsModalOpen(false)}
+        projectId={projectId}
+      />
+
+      {/* Import Activity Modal (global) */}
+      <ImportActivityModal
+        isOpen={isImportActivityModalOpen}
+        onClose={() => setIsImportActivityModalOpen(false)}
+        projectId={projectId}
+        workPackageId={selectedWorkPackageId}
+      />
 
       {/* Finalize Budget Dialog */}
       <Dialog open={isFinalizingBudget} onOpenChange={setIsFinalizingBudget}>
@@ -876,9 +917,30 @@ function TreeItem({
         </div>
         
         <div className="flex space-x-1">
+          {/* Import Activities button - always visible for WorkPackage items */}
+          {item.type === "WorkPackage" && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setIsImportActivityModalOpen(true)}
+                  >
+                    <FileUp className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Import Activities</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          
           {isBudgetFinalized ? (
-            <span className="invisible">
-              {/* Keep empty space for layout consistency but make it invisible */}
+            <span>
+              {/* Keep space for layout consistency */}
             </span>
           ) : (
             <>
@@ -934,27 +996,6 @@ function TreeItem({
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>Add Child Item</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-              
-              {/* Import Activities button for WorkPackage items */}
-              {item.type === "WorkPackage" && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => setIsImportActivityModalOpen(true)}
-                      >
-                        <FileUp className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Import Activities</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>

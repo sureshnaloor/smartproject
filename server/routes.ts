@@ -961,7 +961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/wbs/activities/import", async (req: Request, res: Response) => {
     try {
-      const { projectId, csvData } = req.body;
+      const { projectId, workPackageId, csvData } = req.body;
       
       if (!projectId || !csvData || !Array.isArray(csvData)) {
         return res.status(400).json({ message: "Invalid request body" });
@@ -977,6 +977,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const wbsItems = await storage.getWbsItems(projectId);
       const wbsItemsByCode = new Map(wbsItems.map(item => [item.code, item]));
       
+      // Check if the workPackage exists if provided
+      let parentWorkPackage = null;
+      if (workPackageId) {
+        parentWorkPackage = wbsItems.find(item => item.id === workPackageId);
+        if (!parentWorkPackage) {
+          return res.status(404).json({ message: "Work Package not found" });
+        }
+        if (parentWorkPackage.type !== "WorkPackage") {
+          return res.status(400).json({ message: "Provided ID is not a Work Package" });
+        }
+      }
+      
       // Track any validation errors
       const errors = [];
       const results = [];
@@ -986,26 +998,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const row = csvData[i];
         
         // Skip invalid rows
-        if (!row.wbsCode) {
-          errors.push(`Row ${i + 1}: Missing required WBS code`);
+        if (!row.code) {
+          errors.push(`Row ${i + 1}: Missing required activity code`);
+          continue;
+        }
+        
+        if (!row.name) {
+          errors.push(`Row ${i + 1}: Missing required activity name`);
           continue;
         }
         
         // Find the WBS item by code
-        const existingItem = wbsItemsByCode.get(row.wbsCode);
-        
-        // Check if the item exists
-        if (!existingItem) {
-          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' not found`);
-          continue;
-        }
-        
-        // Validate that the item is of type "Activity"
-        if (existingItem.type !== "Activity") {
-          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' is not an Activity (type: ${existingItem.type})`);
-          continue;
-        }
-        
+        const existingItem = wbsItemsByCode.get(row.code);
+        const isUpdate = !!existingItem;
+
         // Parse dates if provided
         let startDate = null;
         let endDate = null;
@@ -1048,6 +1054,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         
+        // For new activities, require either duration or endDate
+        if (!isUpdate && !row.duration && !row.endDate) {
+          errors.push(`Row ${i + 1}: Either duration or endDate must be provided for new activities`);
+          continue;
+        }
+        
         // Calculate missing values
         if (startDate && endDate && !duration) {
           // Calculate duration from start and end dates
@@ -1065,30 +1077,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
           continue;
         }
         
-        // Update activity data
-        const activityData = {
-          name: row.name || existingItem.name,
-          description: row.description !== undefined ? row.description : existingItem.description,
-          startDate: startDate || undefined,
-          endDate: endDate || undefined,
-          duration: duration || undefined,
-          percentComplete: row.percentComplete !== undefined ? Number(row.percentComplete) : existingItem.percentComplete
-        };
-        
         try {
-          // Update the existing activity
-          const updatedItem = await storage.updateWbsItem(existingItem.id, activityData);
-          results.push({ ...updatedItem, status: "updated" });
+          // If existing item and it's an activity, update it
+          if (isUpdate) {
+            if (existingItem.type !== "Activity") {
+              errors.push(`Row ${i + 1}: Item with code '${row.code}' exists but is not an Activity (type: ${existingItem.type})`);
+              continue;
+            }
+            
+            // If workPackageId is specified, validate that the activity belongs to this work package
+            if (workPackageId && existingItem.parentId !== workPackageId) {
+              errors.push(`Row ${i + 1}: Activity with code '${row.code}' exists but belongs to a different Work Package`);
+              continue;
+            }
+            
+            // Update activity data
+            const activityData = {
+              name: row.name,
+              description: row.description || existingItem.description || "",
+              startDate: startDate || undefined,
+              endDate: endDate || undefined,
+              duration: duration || undefined,
+              percentComplete: row.percentComplete !== undefined ? Number(row.percentComplete) : existingItem.percentComplete
+            };
+            
+            // Update the existing activity
+            const updatedItem = await storage.updateWbsItem(existingItem.id, activityData);
+            results.push({ ...updatedItem, status: "updated" });
+          } else {
+            // Create new activity
+            if (!workPackageId) {
+              errors.push(`Row ${i + 1}: Cannot create new activity '${row.code}' without specifying a Work Package`);
+              continue;
+            }
+            
+            if (!parentWorkPackage) {
+              errors.push(`Row ${i + 1}: Parent Work Package not found`);
+              continue;
+            }
+            
+            // Prepare new activity data
+            const newActivity = {
+              projectId,
+              parentId: workPackageId,
+              name: row.name,
+              description: row.description || "",
+              level: parentWorkPackage.level + 1,
+              code: row.code,
+              type: "Activity" as "Summary" | "WorkPackage" | "Activity",
+              budgetedCost: 0, // Activities don't have budget
+              actualCost: 0,
+              percentComplete: row.percentComplete ? Number(row.percentComplete) : 0,
+              startDate: startDate as Date,
+              endDate: endDate || undefined,
+              duration: duration || undefined,
+              isTopLevel: false,
+            };
+            
+            // Create the new activity
+            const createdItem = await storage.createWbsItem(newActivity);
+            results.push({ ...createdItem, status: "created" });
+          }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          errors.push(`Row ${i + 1}: Failed to update Activity - ${errorMessage}`);
+          errors.push(`Row ${i + 1}: Failed to ${isUpdate ? 'update' : 'create'} Activity - ${errorMessage}`);
         }
       }
       
       // Return errors if any
       if (errors.length > 0) {
         return res.status(400).json({
-          message: "Some activities could not be updated",
+          message: "Some activities could not be processed",
           errors,
           results
         });
@@ -1096,8 +1155,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Return success
       return res.status(200).json({
-        message: "All activities updated successfully",
+        message: "Activities processed successfully",
         count: results.length,
+        created: results.filter(r => r.status === "created").length,
+        updated: results.filter(r => r.status === "updated").length,
         results
       });
     } catch (err) {
