@@ -12,6 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface GanttChartProps {
   projectId: number;
@@ -37,9 +43,20 @@ const formatPercent = (value: number | string | null | undefined): string => {
   return `${Math.round(Number(value))}%`;
 };
 
+const formatDate = (date: string | null | undefined): string => {
+  if (!date) return '';
+  const d = new Date(date);
+  return d.toLocaleDateString('en-US', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric' 
+  });
+};
+
 export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
   const [timeScale, setTimeScale] = useState<"weeks" | "months">("months");
+  const [showCalendar, setShowCalendar] = useState<boolean>(true);
   const debuggedItems = useRef(false);
   const itemsDataVersion = useRef<string>("");
   const [loadingItems, setLoadingItems] = useState<Set<number>>(new Set());
@@ -164,7 +181,7 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
   });
 
   // Calculate project timeline based only on Activity items
-  const { startDate, endDate, totalDays } = useMemo(() => {
+  const { startDate, endDate, totalDays, todayPosition } = useMemo(() => {
     // Filter to only Activity items with dates
     const activitiesWithDates = wbsItems.filter(
       item => item.type === "Activity" && item.startDate && item.endDate
@@ -178,7 +195,8 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
       return {
         startDate: today,
         endDate: sixMonthsLater,
-        totalDays: 180 // Approximate
+        totalDays: 180, // Approximate
+        todayPosition: 0 // At the start
       };
     }
     
@@ -202,10 +220,25 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
     const diffTime = Math.abs(maxDate.getTime() - minDate.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
+    // Calculate today's position as percentage
+    const today = new Date();
+    let todayPosition = 0;
+    
+    if (today >= minDate && today <= maxDate) {
+      const diffFromStart = Math.abs(today.getTime() - minDate.getTime());
+      const diffDaysFromStart = Math.ceil(diffFromStart / (1000 * 60 * 60 * 24));
+      todayPosition = (diffDaysFromStart / diffDays) * 100;
+    } else if (today < minDate) {
+      todayPosition = 0;
+    } else {
+      todayPosition = 100;
+    }
+    
     return {
       startDate: minDate,
       endDate: maxDate,
-      totalDays: diffDays
+      totalDays: diffDays,
+      todayPosition
     };
   }, [wbsItems]);
 
@@ -463,6 +496,14 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
               </SelectContent>
             </Select>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-2"
+            onClick={() => setShowCalendar(!showCalendar)}
+          >
+            {showCalendar ? "Hide Calendar" : "Show Calendar"}
+          </Button>
         </div>
         <div className="flex space-x-2">
           <Button 
@@ -497,19 +538,50 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
               <div className="py-2 px-4 font-medium text-sm bg-gray-50">
                 WBS Item
               </div>
-              <div className="grid" style={{ gridTemplateColumns: `repeat(${timeScaleHeaders.length}, 1fr)` }}>
-                {timeScaleHeaders.map((header, index) => (
-                  <div 
-                    key={index} 
-                    className="py-2 px-1 font-medium text-xs text-center bg-gray-50"
-                  >
-                    {header}
-                  </div>
-                ))}
-              </div>
+              {showCalendar && (
+                <div className="grid" style={{ gridTemplateColumns: `repeat(${timeScaleHeaders.length}, 1fr)` }}>
+                  {timeScaleHeaders.map((header, index) => (
+                    <div 
+                      key={index} 
+                      className="py-2 px-1 font-medium text-xs text-center bg-gray-50"
+                    >
+                      {header}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!showCalendar && (
+                <div className="py-2 px-4 font-medium text-sm bg-gray-50 text-center">
+                  Timeline (hover over bars for dates)
+                </div>
+              )}
             </div>
             
-            <div>
+            <div className="relative">
+              {/* Vertical date lines */}
+              {showCalendar && (
+                <div 
+                  className="absolute inset-0 grid pointer-events-none" 
+                  style={{ gridTemplateColumns: `repeat(${timeScaleHeaders.length}, 1fr)` }}
+                >
+                  {timeScaleHeaders.map((_, index) => (
+                    <div key={index} className="h-full border-r border-gray-200 last:border-r-0"></div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Today indicator line */}
+              {todayPosition > 0 && todayPosition < 100 && (
+                <div 
+                  className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-10 pointer-events-none"
+                  style={{ left: `calc(250px + (100% - 250px) * ${todayPosition / 100})` }}
+                >
+                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded whitespace-nowrap">
+                    Today
+                  </div>
+                </div>
+              )}
+              
               {hierarchicalItems.length === 0 ? (
                 <div className="px-4 py-3 text-center text-gray-500">
                   No scheduled items found.
@@ -528,6 +600,29 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
           In the current WBS structure, only Activity items have schedules. 
           Summary and WorkPackage items are used for budget organization and do not have dates.
         </p>
+        
+        {/* Add legend for colors and indicators */}
+        <div className="mt-3 pt-3 border-t border-blue-200">
+          <p className="font-medium mb-2">Legend:</p>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex items-center">
+              <div className="w-3 h-3 bg-gray-400 rounded-sm mr-2"></div>
+              <span>Not Started (0%)</span>
+            </div>
+            <div className="flex items-center">
+              <div className="w-3 h-3 bg-blue-500 rounded-sm mr-2"></div>
+              <span>In Progress (1-99%)</span>
+            </div>
+            <div className="flex items-center">
+              <div className="w-3 h-3 bg-green-500 rounded-sm mr-2"></div>
+              <span>Complete (100%)</span>
+            </div>
+            <div className="flex items-center">
+              <div className="w-2 h-3 bg-red-500 mr-2"></div>
+              <span>Today</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -636,17 +731,53 @@ function GanttItem({
         </div>
         <div className="relative h-8 py-1 flex">
           {item.type === "Activity" && (
-            <div 
-              className={`absolute h-6 ${getBarColor()} rounded-sm opacity-90`}
-              style={calculatePosition()}
-            >
-              <div 
-                className="absolute inset-0 flex items-center justify-center text-xs text-white font-medium"
-                style={{ padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-              >
-                {formatPercent(item.percentComplete)}
-              </div>
-            </div>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div 
+                    className={`absolute h-6 ${getBarColor()} rounded-sm opacity-90 cursor-pointer hover:opacity-100 transition-opacity`}
+                    style={calculatePosition()}
+                  >
+                    <div 
+                      className="absolute inset-0 flex items-center justify-center text-xs text-white font-medium"
+                      style={{ padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {formatPercent(item.percentComplete)}
+                    </div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="p-0 bg-white rounded-md shadow-lg border border-gray-200">
+                  <div className="p-3 max-w-xs">
+                    <div className="font-medium text-sm">{item.name}</div>
+                    {item.startDate && item.endDate && (
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                        <div>
+                          <div className="text-gray-500">Start Date</div>
+                          <div className="font-medium">{formatDate(item.startDate)}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">End Date</div>
+                          <div className="font-medium">{formatDate(item.endDate)}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Duration</div>
+                          <div className="font-medium">
+                            {Math.ceil(
+                              (new Date(item.endDate).getTime() - new Date(item.startDate).getTime()) / 
+                              (1000 * 60 * 60 * 24)
+                            ) + 1} days
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Progress</div>
+                          <div className="font-medium">{formatPercent(item.percentComplete)}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           {item.type !== "Activity" && (
             <div className="absolute inset-0 flex items-center px-4">
