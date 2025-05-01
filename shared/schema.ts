@@ -56,6 +56,20 @@ export const costEntries = pgTable("cost_entries", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Tasks Table
+export const tasks = pgTable("tasks", {
+  id: serial("id").primaryKey(),
+  activityId: integer("activity_id").notNull().references(() => wbsItems.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  duration: integer("duration"),
+  percentComplete: numeric("percent_complete", { precision: 5, scale: 2 }).default("0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Insert Schemas
 export const insertProjectSchema = createInsertSchema(projects)
   .omit({ id: true, createdAt: true })
@@ -142,6 +156,35 @@ export const insertWbsItemSchema = baseWbsSchema
 export const insertDependencySchema = createInsertSchema(dependencies).omit({ id: true, createdAt: true });
 export const insertCostEntrySchema = createInsertSchema(costEntries).omit({ id: true, createdAt: true });
 
+// Task schema
+export const insertTaskSchema = createInsertSchema(tasks)
+  .omit({ id: true, createdAt: true })
+  .extend({
+    percentComplete: z.string().or(z.number()).pipe(
+      z.coerce.number().min(0).max(100, "Percentage must be between 0 and 100")
+    ).default(0),
+    startDate: z.date().or(z.string().transform(str => str ? new Date(str) : undefined)).optional(),
+    endDate: z.date().or(z.string().transform(str => str ? new Date(str) : undefined)).optional(),
+    duration: z.string().or(z.number()).pipe(z.coerce.number().nonnegative()).optional(),
+  })
+  .refine(
+    (data) => {
+      // If startDate is provided, either endDate XOR duration should be provided (not both)
+      if (data.startDate) {
+        // XOR - either endDate exists or duration exists, but not both
+        return (data.endDate !== undefined && data.duration === undefined) || 
+               (data.endDate === undefined && data.duration !== undefined);
+      }
+      
+      // If no startDate, no validation needed
+      return true;
+    },
+    {
+      message: "When start date is provided, you must provide either end date OR duration, but not both",
+      path: ["endDate"],
+    }
+  );
+
 // Types
 export type Project = typeof projects.$inferSelect;
 export type InsertProject = z.infer<typeof insertProjectSchema>;
@@ -154,6 +197,9 @@ export type InsertDependency = z.infer<typeof insertDependencySchema>;
 
 export type CostEntry = typeof costEntries.$inferSelect;
 export type InsertCostEntry = z.infer<typeof insertCostEntrySchema>;
+
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = z.infer<typeof insertTaskSchema>;
 
 // Extended schemas for client-side validation
 export const extendedInsertProjectSchema = insertProjectSchema.extend({

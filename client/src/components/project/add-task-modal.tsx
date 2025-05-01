@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { WbsItem } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
-import { addDays } from "date-fns";
+import { addDays, format } from "date-fns";
 import {
   Dialog,
   DialogContent,
@@ -38,12 +38,14 @@ import {
 interface Task {
   id?: number;
   activityId: number;
+  projectId?: number;
   name: string;
   description?: string;
   startDate?: string | null;
   endDate?: string | null;
   duration?: number;
   percentComplete?: number;
+  dependencies?: { predecessorId: number; successorId: number; type: string; lag: number }[];
 }
 
 // Define props for the AddTaskModal component
@@ -60,15 +62,21 @@ const taskFormSchema = z.object({
   activityId: z.string().refine(val => !!val, "Activity is required"),
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
-  duration: z.number().optional().nullable(),
-  percentComplete: z.number().min(0).max(100).default(0),
+  startDate: z.date().nullable().optional(),
+  endDate: z.date().nullable().optional(),
+  duration: z.number().nonnegative("Duration must be a positive number").nullable().optional(),
+  percentComplete: z.number().min(0).max(100, "Progress must be between 0 and 100").default(0).optional(),
 }).refine(data => {
-  // Either endDate or duration must be provided
-  return !!data.endDate || !!data.duration;
+  console.log("Refining form data:", data);
+  
+  // If no start date is provided, no validation needed for end date/duration
+  if (!data.startDate) return true;
+  
+  // If start date exists, either end date or duration should be provided
+  return (data.endDate !== null && data.endDate !== undefined) || 
+         (data.duration !== null && data.duration !== undefined);
 }, {
-  message: "Either End Date or Duration must be provided",
+  message: "When start date is provided, please provide either end date or duration",
   path: ["endDate"],
 });
 
@@ -92,8 +100,8 @@ export function AddTaskModal({
       activityId: selectedActivityId ? String(selectedActivityId) : "",
       name: "",
       description: "",
-      startDate: "",
-      endDate: "",
+      startDate: null,
+      endDate: null,
       duration: null,
       percentComplete: 0,
     },
@@ -111,25 +119,56 @@ export function AddTaskModal({
     setIsLoading(true);
     
     try {
-      // If endDate is not provided but duration is, calculate the end date
-      let endDate = values.endDate;
+      // Calculate endDate if not provided but duration is, and startDate exists
+      let endDate: Date | null = values.endDate ?? null;
+      let duration = values.duration;
       
-      if (!endDate && values.startDate && values.duration) {
-        const startDate = new Date(values.startDate);
-        const calculatedEndDate = addDays(startDate, values.duration);
-        endDate = calculatedEndDate.toISOString().split('T')[0];
+      // Format dates as ISO strings for the API
+      const startDateString = values.startDate ? values.startDate.toISOString() : null;
+      let endDateString = null;
+      
+      // Only calculate/include either endDate or duration, not both
+      if (values.endDate) {
+        // If end date is explicitly provided, use it and don't include duration
+        endDateString = values.endDate.toISOString();
+        duration = undefined; // Don't include duration if we have end date
+      } else if (values.startDate && values.duration) {
+        // If we have start date and duration, calculate end date
+        const calculatedEndDate = addDays(values.startDate, values.duration);
+        endDateString = calculatedEndDate.toISOString();
+        // Keep duration in this case
       }
       
-      // Create task object
+      // Get project ID from selected activity
+      const selectedActivity = activities.find(a => a.id === parseInt(values.activityId));
+      const projectId = selectedActivity?.projectId;
+      
+      if (!projectId) {
+        throw new Error("Could not determine project ID from selected activity");
+      }
+      
+      // Create task object with required fields
       const task: Task = {
         activityId: parseInt(values.activityId),
+        projectId: projectId,
         name: values.name,
-        description: values.description,
-        startDate: values.startDate || null,
-        endDate: endDate || null,
-        duration: values.duration || undefined,
-        percentComplete: values.percentComplete,
+        description: values.description || "",
+        percentComplete: values.percentComplete || 0
       };
+      
+      // Only add startDate if it exists
+      if (startDateString) {
+        task.startDate = startDateString;
+      }
+      
+      // Only add one of endDate or duration, not both
+      if (endDateString) {
+        task.endDate = endDateString;
+      } else if (duration) {
+        task.duration = duration;
+      }
+      
+      console.log("Submitting task:", task);
       
       // Call the onAdd callback
       onAdd(task);
@@ -150,7 +189,7 @@ export function AddTaskModal({
       // Show error toast
       toast({
         title: "Error",
-        description: "Failed to add task. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to add task. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -246,8 +285,18 @@ export function AddTaskModal({
                   <FormItem className="flex flex-col">
                     <FormLabel>Start Date</FormLabel>
                     <DatePicker
-                      value={field.value}
-                      onChange={field.onChange}
+                      selected={field.value}
+                      onSelect={(date) => {
+                        field.onChange(date);
+                        
+                        // If duration is set, auto-calculate end date
+                        const duration = form.getValues('duration');
+                        if (date && duration) {
+                          const calculatedEndDate = addDays(date, duration);
+                          form.setValue('endDate', calculatedEndDate);
+                        }
+                      }}
+                      disabled={isLoading}
                     />
                     <FormMessage />
                   </FormItem>
@@ -261,9 +310,9 @@ export function AddTaskModal({
                   <FormItem className="flex flex-col">
                     <FormLabel>End Date</FormLabel>
                     <DatePicker
-                      value={field.value}
-                      onChange={field.onChange}
-                      disabled={!!form.watch("duration")}
+                      selected={field.value}
+                      onSelect={field.onChange}
+                      disabled={!!form.watch("duration") || isLoading}
                     />
                     <FormMessage />
                   </FormItem>
@@ -282,13 +331,20 @@ export function AddTaskModal({
                       <Input 
                         type="number" 
                         min={0}
-                        disabled={!!form.watch("endDate")}
+                        disabled={!!form.watch("endDate") || isLoading}
                         placeholder="Duration in days"
                         {...field}
                         value={field.value === null ? '' : field.value}
-                        onChange={e => {
-                          const value = e.target.value === '' ? null : parseInt(e.target.value);
+                        onChange={(e) => {
+                          const value = e.target.value === '' ? null : Number(e.target.value);
                           field.onChange(value);
+                          
+                          // Calculate end date if start date is provided
+                          const startDate = form.getValues('startDate');
+                          if (startDate && value !== null) {
+                            const calculatedEndDate = addDays(startDate, value);
+                            form.setValue('endDate', null); // Clear end date to avoid conflicts
+                          }
                         }}
                       />
                     </FormControl>

@@ -41,6 +41,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 interface Task {
   id?: number;
   activityId: number;
+  projectId?: number;
   name: string;
   description?: string;
   startDate?: string | null;
@@ -75,6 +76,17 @@ export default function Schedule() {
   const { data: wbsItems = [], isLoading: isLoadingWbs } = useQuery<WbsItem[]>({
     queryKey: [`/api/projects/${projectId}/wbs`],
   });
+
+  // Fetch tasks for the project
+  const { data: taskData = [], isLoading: isLoadingTasks } = useQuery<Task[]>({
+    queryKey: [`/api/projects/${projectId}/tasks`],
+    enabled: projectId > 0,
+  });
+
+  // Update the local tasks state when taskData changes
+  useEffect(() => {
+    setTasks(taskData);
+  }, [taskData]);
 
   // Find work package items (use a Set to ensure uniqueness by ID)
   const workPackageItems = useMemo(() => {
@@ -343,71 +355,99 @@ export default function Schedule() {
     finalizeSchedule.mutate();
   };
 
-  // Fetch tasks for the project (mock implementation for now)
-  useEffect(() => {
-    // This would typically be a query to fetch tasks from the server
-    // For now, we're just using local state
-    const activityItems = wbsItems.filter(item => item.type === "Activity");
-    
-    // Generate some sample tasks for demo purposes
-    const sampleTasks: Task[] = [];
-    activityItems.forEach(activity => {
-      if (Math.random() > 0.7) { // Only add tasks to some activities
-        const numTasks = Math.floor(Math.random() * 3) + 1;
-        for (let i = 1; i <= numTasks; i++) {
-          sampleTasks.push({
-            id: sampleTasks.length + 1,
-            activityId: activity.id,
-            name: `Task ${i} for ${activity.name}`,
-            description: `Sample task ${i} for activity ${activity.name}`,
-            startDate: activity.startDate || null,
-            endDate: activity.endDate || null,
-            percentComplete: Math.floor(Math.random() * 100),
-          });
-        }
-      }
-    });
-    
-    setTasks(sampleTasks);
-  }, [wbsItems]);
-
   // Handle adding a task to an activity
   const handleAddTask = (activityId: number) => {
     setSelectedActivityId(activityId);
     setIsAddTaskModalOpen(true);
   };
 
+  // Create task mutation
+  const createTask = useMutation({
+    mutationFn: async (task: Task) => {
+      const response = await apiRequest("POST", "/api/tasks", task);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to create task");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/tasks`] });
+      toast({
+        title: "Task Created",
+        description: "The task has been created successfully.",
+        variant: "default",
+      });
+    },
+    onError: (error: Error) => {
+      console.error("Task creation error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create task. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleCreateTask = (task: Task) => {
-    // In a real implementation, this would save to the backend
-    // For now, we'll just add it to our local state
-    const newTask = {
-      ...task,
-      id: Date.now(), // Generate a temporary id
+    console.log("Handling create task:", task);
+    
+    // Create a clean task object to avoid any unwanted properties
+    const taskToCreate: Task = {
+      activityId: task.activityId,
+      projectId: task.projectId || projectId,
+      name: task.name,
+      description: task.description || "",
+      percentComplete: task.percentComplete || 0,
     };
     
-    setTasks((prevTasks) => [...prevTasks, newTask]);
-    setIsAddTaskModalOpen(false);
+    // Only add startDate if it exists
+    if (task.startDate) {
+      taskToCreate.startDate = task.startDate;
+    }
     
-    toast({
-      title: "Task Added",
-      description: "The task has been added successfully.",
-    });
+    // Only add one of endDate or duration, not both
+    if (task.endDate) {
+      taskToCreate.endDate = task.endDate;
+    } else if (task.duration) {
+      taskToCreate.duration = task.duration;
+    } else if (task.startDate) {
+      // If we have a startDate but neither endDate nor duration, add a default duration
+      taskToCreate.duration = 1; // Default to 1 day
+    }
+    
+    console.log("Sending task to API:", taskToCreate);
+    createTask.mutate(taskToCreate);
+    setIsAddTaskModalOpen(false);
   };
 
+  // Import tasks mutation
+  const importTasks = useMutation({
+    mutationFn: async (tasks: Task[]) => {
+      const response = await apiRequest("POST", "/api/tasks/bulk", tasks);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/tasks`] });
+      toast({
+        title: "Tasks Imported",
+        description: `${data.length} tasks have been imported successfully.`,
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to import tasks. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleImportTasks = (importedTasks: Task[]) => {
-    // In a real implementation, this would save to the backend
-    // For now, we'll just add them to our local state
-    const newTasks = importedTasks.map(task => ({
-      ...task,
-      id: Date.now() + Math.floor(Math.random() * 1000), // Generate temporary ids
-    }));
-    
-    setTasks((prevTasks) => [...prevTasks, ...newTasks]);
-    
-    toast({
-      title: "Tasks Imported",
-      description: `${newTasks.length} tasks have been imported successfully.`,
-    });
+    importTasks.mutate(importedTasks);
   };
 
   // Define task table columns
@@ -457,7 +497,54 @@ export default function Schedule() {
         return progress !== undefined ? `${progress}%` : "0%";
       },
     },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: ({ row }) => {
+        const task = row.original;
+        return (
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleDeleteTask(task.id!)}
+            >
+              <X className="h-4 w-4 text-red-500" />
+            </Button>
+          </div>
+        );
+      },
+    },
   ];
+
+  // Delete task mutation
+  const deleteTask = useMutation({
+    mutationFn: async (taskId: number) => {
+      const response = await apiRequest("DELETE", `/api/tasks/${taskId}`);
+      return response;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/tasks`] });
+      toast({
+        title: "Task Deleted",
+        description: "The task has been deleted successfully.",
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete task. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  const handleDeleteTask = (taskId: number) => {
+    if (confirm("Are you sure you want to delete this task?")) {
+      deleteTask.mutate(taskId);
+    }
+  };
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -702,7 +789,7 @@ export default function Schedule() {
         onClose={() => setIsAddActivityModalOpen(false)}
         projectId={projectId}
         parentId={selectedParentId}
-        type="Activity"
+        scheduleView={true}
       />
 
       {/* Add Task Modal */}

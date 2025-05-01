@@ -1,32 +1,56 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProjectSchema, insertWbsItemSchema, insertDependencySchema, insertCostEntrySchema, updateWbsProgressSchema, csvImportSchema } from "@shared/schema";
+import { insertProjectSchema, insertWbsItemSchema, insertDependencySchema, insertCostEntrySchema, updateWbsProgressSchema, csvImportSchema, insertTaskSchema, InsertTask } from "@shared/schema";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
-import cors from "cors";
+import fileUpload from "express-fileupload";
+// Create an inline implementation for cors
+const cors = () => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  };
+};
 import { DatabaseStorage } from "./storage";
-import { uploadMiddleware } from "./middleware";
-import { handleError } from "./error-handler";
+// Create uploadMiddleware using express-fileupload
+const uploadMiddleware = fileUpload({
+  useTempFiles: true,
+  tempFileDir: '/tmp/',
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+});
+// Create an inline error handler
+const handleError = (err: unknown, res: Response) => {
+  console.error("Server error:", err);
+  
+  if (err instanceof ZodError) {
+    const validationError = fromZodError(err);
+    return res.status(400).json({ 
+      message: "Validation error: " + validationError.message,
+      errors: err.errors 
+    });
+  }
+  
+  if (err instanceof Error) {
+    return res.status(400).json({ message: err.message });
+  }
+  
+  return res.status(500).json({ message: "An unexpected error occurred" });
+};
 import { WbsItem, Dependency } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
-  // Error handling middleware
-  const handleError = (err: unknown, res: Response) => {
-    console.error(err);
-    
-    if (err instanceof ZodError) {
-      return res.status(400).json({ 
-        message: "Validation error", 
-        errors: fromZodError(err).message
-      });
-    }
-    
-    return res.status(500).json({ message: "Internal server error" });
-  };
+  // Middleware
+  app.use(cors());
+  app.use(uploadMiddleware);
 
   // Project routes
   app.get("/api/projects", async (req: Request, res: Response) => {
@@ -1219,8 +1243,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const deps = successorDeps.get(item.id);
         if (!deps || deps.length === 0) continue;
         
-        let newStartDate = new Date(item.startDate);
-        let newEndDate = new Date(item.endDate);
+        let newStartDate = item.startDate ? new Date(item.startDate) : new Date();
+        let newEndDate = item.endDate ? new Date(item.endDate) : new Date();
         let datesChanged = false;
         
         for (const dep of deps) {
@@ -1313,6 +1337,256 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         message: err.message || "Internal server error" 
       });
+    }
+  });
+
+  // Task routes
+  app.get("/api/projects/:projectId/tasks", async (req: Request, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ message: "Invalid project ID" });
+      }
+
+      const tasks = await storage.getTasks(projectId);
+      res.json(tasks);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.get("/api/activities/:activityId/tasks", async (req: Request, res: Response) => {
+    try {
+      const activityId = parseInt(req.params.activityId);
+      if (isNaN(activityId)) {
+        return res.status(400).json({ message: "Invalid activity ID" });
+      }
+
+      const tasks = await storage.getTasksByActivity(activityId);
+      res.json(tasks);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.get("/api/tasks/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      const task = await storage.getTask(id);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      res.json(task);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.post("/api/tasks", async (req: Request, res: Response) => {
+    try {
+      console.log("Creating task with request body:", JSON.stringify(req.body, null, 2));
+      
+      // Ensure required fields have default values if missing
+      const taskRequest = {
+        ...req.body,
+        percentComplete: req.body.percentComplete ?? 0,
+        projectId: req.body.projectId || null // Will be set from activity later
+      };
+      
+      console.log("Adjusted task request:", JSON.stringify(taskRequest, null, 2));
+      
+      // Pre-validate
+      if (taskRequest.startDate) {
+        // If start date is provided, check that we have either endDate OR duration, but not both
+        if (taskRequest.endDate !== undefined && taskRequest.duration !== undefined) {
+          return res.status(400).json({
+            message: "Validation error: Cannot provide both end date and duration",
+            errors: [{
+              code: "custom",
+              message: "Either end date or duration must be provided, but not both",
+              path: ["endDate"]
+            }]
+          });
+        }
+        
+        // Check that at least one of endDate or duration is provided
+        if (taskRequest.endDate === undefined && taskRequest.duration === undefined) {
+          return res.status(400).json({
+            message: "Validation error: When start date is provided, either end date or duration must be provided",
+            errors: [{
+              code: "custom",
+              message: "When start date is provided, either end date or duration must be provided",
+              path: ["endDate"]
+            }]
+          });
+        }
+      }
+      
+      // Try validation
+      try {
+        // Attempt validation
+        const validationResult = insertTaskSchema.safeParse(taskRequest);
+        if (!validationResult.success) {
+          console.error("Task validation failed:", JSON.stringify(validationResult.error, null, 2));
+          return res.status(400).json({ 
+            message: "Validation error", 
+            errors: validationResult.error.errors
+          });
+        }
+        
+        const taskData = validationResult.data;
+        console.log("Validated task data:", JSON.stringify(taskData, null, 2));
+        
+        // Check if the activity exists and is of type 'Activity'
+        const activity = await storage.getWbsItem(taskData.activityId);
+        if (!activity) {
+          return res.status(404).json({ message: "Activity not found" });
+        }
+        
+        if (activity.type !== "Activity") {
+          return res.status(400).json({ message: "Tasks can only be attached to activities" });
+        }
+        
+        // Set the project ID from the activity
+        taskData.projectId = activity.projectId;
+        
+        // Ensure dates are properly converted to Date objects for storage
+        if (typeof taskData.startDate === 'string' && taskData.startDate) {
+          taskData.startDate = new Date(taskData.startDate);
+        }
+        
+        if (typeof taskData.endDate === 'string' && taskData.endDate) {
+          taskData.endDate = new Date(taskData.endDate);
+        }
+        
+        const task = await storage.createTask(taskData);
+        res.status(201).json(task);
+      } catch (validationError) {
+        console.error("Validation processing error:", validationError);
+        throw validationError;
+      }
+    } catch (err) {
+      console.error("Error creating task:", err);
+      handleError(err, res);
+    }
+  });
+
+  app.post("/api/tasks/bulk", async (req: Request, res: Response) => {
+    try {
+      if (!Array.isArray(req.body)) {
+        return res.status(400).json({ message: "Request body must be an array of tasks" });
+      }
+      
+      // Validate each task in the array
+      const tasksData = req.body.map(task => {
+        try {
+          return insertTaskSchema.parse(task);
+        } catch (err) {
+          throw err;
+        }
+      });
+      
+      // Check if all activities exist and set project IDs
+      for (const task of tasksData) {
+        const activity = await storage.getWbsItem(task.activityId);
+        if (!activity) {
+          return res.status(404).json({ message: `Activity with ID ${task.activityId} not found` });
+        }
+        
+        if (activity.type !== "Activity") {
+          return res.status(400).json({ message: `Item with ID ${task.activityId} is not an activity` });
+        }
+        
+        // Set the project ID from the activity
+        task.projectId = activity.projectId;
+      }
+      
+      const tasks = await storage.createTasks(tasksData);
+      res.status(201).json(tasks);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.patch("/api/tasks/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      const task = await storage.getTask(id);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      // Validate and parse the task data
+      const taskData = z.object({
+        activityId: z.number().optional(),
+        projectId: z.number().optional(),
+        name: z.string().optional(),
+        description: z.string().nullable().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        duration: z.number().optional(),
+        percentComplete: z.number().min(0).max(100).optional(),
+      }).parse(req.body);
+      
+      // If changing activity, check if it exists and is of type 'Activity'
+      if (taskData.activityId && taskData.activityId !== task.activityId) {
+        const activity = await storage.getWbsItem(taskData.activityId);
+        if (!activity) {
+          return res.status(404).json({ message: "Activity not found" });
+        }
+        
+        if (activity.type !== "Activity") {
+          return res.status(400).json({ message: "Tasks can only be attached to activities" });
+        }
+        
+        // Update the project ID if activity is changing
+        taskData.projectId = activity.projectId;
+      }
+
+      // Create a properly typed object for the update
+      const taskDataWithDateConversion: Partial<InsertTask> = { ...taskData };
+      if (taskDataWithDateConversion.startDate) {
+        taskDataWithDateConversion.startDate = new Date(taskDataWithDateConversion.startDate);
+      }
+      if (taskDataWithDateConversion.endDate) {
+        taskDataWithDateConversion.endDate = new Date(taskDataWithDateConversion.endDate);
+      }
+      const updatedTask = await storage.updateTask(id, taskDataWithDateConversion);
+      res.json(updatedTask);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.delete("/api/tasks/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      const task = await storage.getTask(id);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      const success = await storage.deleteTask(id);
+      if (success) {
+        res.status(204).end();
+      } else {
+        res.status(500).json({ message: "Failed to delete task" });
+      }
+    } catch (err) {
+      handleError(err, res);
     }
   });
 
