@@ -3,11 +3,14 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, Dependency, InsertDependency } from "@shared/schema";
-import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle, CalendarClock } from "lucide-react";
+import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle, CalendarClock, ImportIcon, ListTodo, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { GanttChart } from "@/components/project/gantt-chart";
 import { AddWbsModal } from "@/components/project/add-wbs-modal";
+import { ImportActivityModal } from "@/components/project/import-activity-modal";
+import { ImportTaskModal } from "@/components/project/import-task-modal";
+import { AddTaskModal } from "@/components/project/add-task-modal";
 import { formatDate, formatShortDate, isValidDependency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { ColumnDef } from "@tanstack/react-table";
@@ -32,12 +35,29 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+// Define a Task interface
+interface Task {
+  id?: number;
+  activityId: number;
+  name: string;
+  description?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  duration?: number;
+  percentComplete?: number;
+  dependencies?: { predecessorId: number; successorId: number; type: string; lag: number }[];
+}
 
 export default function Schedule() {
-  const params = useParams();
-  const projectId = parseInt(params.projectId);
+  const params = useParams<{ projectId: string }>();
+  const projectId = parseInt(params.projectId || "0");
+  const [activeTab, setActiveTab] = useState<string>("schedule");
   const [isAddDependencyModalOpen, setIsAddDependencyModalOpen] = useState(false);
   const [isAddActivityModalOpen, setIsAddActivityModalOpen] = useState(false);
+  const [isImportTasksModalOpen, setIsImportTasksModalOpen] = useState(false);
+  const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
   const [selectedParentId, setSelectedParentId] = useState<number | null>(null);
   const [predecessorId, setPredecessorId] = useState<number | null>(null);
   const [successorId, setSuccessorId] = useState<number | null>(null);
@@ -45,6 +65,8 @@ export default function Schedule() {
   const [lag, setLag] = useState<number>(0);
   const debuggedItems = useRef(false);
   const [isProcessingSchedule, setIsProcessingSchedule] = useState(false);
+  const [selectedActivityId, setSelectedActivityId] = useState<number | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -321,283 +343,384 @@ export default function Schedule() {
     finalizeSchedule.mutate();
   };
 
-  // Define columns for dependency table
-  const columns: ColumnDef<Dependency>[] = [
+  // Fetch tasks for the project (mock implementation for now)
+  useEffect(() => {
+    // This would typically be a query to fetch tasks from the server
+    // For now, we're just using local state
+    const activityItems = wbsItems.filter(item => item.type === "Activity");
+    
+    // Generate some sample tasks for demo purposes
+    const sampleTasks: Task[] = [];
+    activityItems.forEach(activity => {
+      if (Math.random() > 0.7) { // Only add tasks to some activities
+        const numTasks = Math.floor(Math.random() * 3) + 1;
+        for (let i = 1; i <= numTasks; i++) {
+          sampleTasks.push({
+            id: sampleTasks.length + 1,
+            activityId: activity.id,
+            name: `Task ${i} for ${activity.name}`,
+            description: `Sample task ${i} for activity ${activity.name}`,
+            startDate: activity.startDate || null,
+            endDate: activity.endDate || null,
+            percentComplete: Math.floor(Math.random() * 100),
+          });
+        }
+      }
+    });
+    
+    setTasks(sampleTasks);
+  }, [wbsItems]);
+
+  // Handle adding a task to an activity
+  const handleAddTask = (activityId: number) => {
+    setSelectedActivityId(activityId);
+    setIsAddTaskModalOpen(true);
+  };
+
+  const handleCreateTask = (task: Task) => {
+    // In a real implementation, this would save to the backend
+    // For now, we'll just add it to our local state
+    const newTask = {
+      ...task,
+      id: Date.now(), // Generate a temporary id
+    };
+    
+    setTasks((prevTasks) => [...prevTasks, newTask]);
+    setIsAddTaskModalOpen(false);
+    
+    toast({
+      title: "Task Added",
+      description: "The task has been added successfully.",
+    });
+  };
+
+  const handleImportTasks = (importedTasks: Task[]) => {
+    // In a real implementation, this would save to the backend
+    // For now, we'll just add them to our local state
+    const newTasks = importedTasks.map(task => ({
+      ...task,
+      id: Date.now() + Math.floor(Math.random() * 1000), // Generate temporary ids
+    }));
+    
+    setTasks((prevTasks) => [...prevTasks, ...newTasks]);
+    
+    toast({
+      title: "Tasks Imported",
+      description: `${newTasks.length} tasks have been imported successfully.`,
+    });
+  };
+
+  // Define task table columns
+  const taskColumns: ColumnDef<Task>[] = [
     {
-      accessorKey: "predecessorId",
-      header: "Predecessor",
+      accessorKey: "name",
+      header: "Task Name",
+    },
+    {
+      accessorKey: "activityId",
+      header: "Activity",
       cell: ({ row }) => {
-        const predecessorId = row.getValue("predecessorId") as number;
-        const predecessor = wbsItems.find(item => item.id === predecessorId);
-        return (
-          <div className="font-medium">
-            {predecessor ? (
-              <div className="flex flex-col">
-                <span>{predecessor.name}</span>
-                <span className="text-xs text-gray-500">Code: {predecessor.code}</span>
-              </div>
-            ) : (
-              "Unknown Item"
-            )}
-          </div>
-        );
+        const activityId = row.getValue("activityId") as number;
+        const activity = wbsItems.find(item => item.id === activityId);
+        return activity?.name || `Activity #${activityId}`;
       },
     },
     {
-      accessorKey: "type",
-      header: "Type",
+      accessorKey: "startDate",
+      header: "Start Date",
       cell: ({ row }) => {
-        const type = row.getValue("type") as string;
-        let description = "";
-        if (type === "FS") description = "Finish to Start";
-        else if (type === "SS") description = "Start to Start";
-        else if (type === "FF") description = "Finish to Finish";
-        else if (type === "SF") description = "Start to Finish";
-        
-        return (
-          <Badge variant="outline">
-            {type} <span className="ml-1 text-xs text-gray-500">({description})</span>
-          </Badge>
-        );
+        const startDate = row.getValue("startDate") as string | null;
+        return startDate ? formatDate(new Date(startDate)) : "-";
       },
     },
     {
-      accessorKey: "lag",
-      header: "Lag (days)",
+      accessorKey: "endDate",
+      header: "End Date",
       cell: ({ row }) => {
-        const lag = row.getValue("lag") as number;
-        return lag || "0";
+        const endDate = row.getValue("endDate") as string | null;
+        return endDate ? formatDate(new Date(endDate)) : "-";
       },
     },
     {
-      accessorKey: "successorId",
-      header: "Successor",
+      accessorKey: "duration",
+      header: "Duration (days)",
       cell: ({ row }) => {
-        const successorId = row.getValue("successorId") as number;
-        const successor = wbsItems.find(item => item.id === successorId);
-        return (
-          <div className="font-medium">
-            {successor ? (
-              <div className="flex flex-col">
-                <span>{successor.name}</span>
-                <span className="text-xs text-gray-500">Code: {successor.code}</span>
-              </div>
-            ) : (
-              "Unknown Item"
-            )}
-          </div>
-        );
+        const duration = row.getValue("duration") as number | undefined;
+        return duration !== undefined ? duration : "-";
       },
     },
     {
-      id: "actions",
+      accessorKey: "percentComplete",
+      header: "Progress",
       cell: ({ row }) => {
-        const predecessorId = row.getValue("predecessorId") as number;
-        const successorId = row.getValue("successorId") as number;
-        
-        return (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-red-500"
-            onClick={() => handleDeleteDependency(predecessorId, successorId)}
-            disabled={deleteDependency.isPending}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        );
+        const progress = row.getValue("percentComplete") as number;
+        return progress !== undefined ? `${progress}%` : "0%";
       },
     },
   ];
 
   return (
-    <div className="flex-1 overflow-auto p-4 bg-gray-50 space-y-6">
-      {/* Schedule Chart Section */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex justify-between items-center">
-            <CardTitle>Project Schedule</CardTitle>
-            <Button 
-              onClick={handleFinalizeSchedule}
-              disabled={isProcessingSchedule || dependencies.length === 0}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {isProcessingSchedule ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <CalendarClock className="mr-2 h-4 w-4" />
-                  Finalize Schedule
-                </>
-              )}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4 text-sm text-blue-800">
-            <p className="font-medium mb-1">Schedule Finalization:</p>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>Click "Finalize Schedule" to recalculate activity dates based on dependencies.</li>
-              <li>Activities will be adjusted to respect all dependency relationships (FS, SS, FF, SF) and lag values.</li>
-              <li>This process will override any manually set dates that would violate dependency constraints.</li>
-              <li>You can run this process multiple times as you add or update dependencies.</li>
-            </ul>
-          </div>
-          <GanttChart projectId={projectId} onAddActivity={handleAddActivity} />
-        </CardContent>
-      </Card>
-      
-      {/* Add Activity Modal */}
-      {isAddActivityModalOpen && (
-        <AddWbsModal
-          projectId={projectId}
-          parentId={selectedParentId}
-          isOpen={isAddActivityModalOpen} 
-          onClose={() => setIsAddActivityModalOpen(false)}
-          onSuccess={() => {
-            queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/wbs`] });
-            setIsAddActivityModalOpen(false);
-          }}
-          scheduleView={true}
-        />
-      )}
-      
-      {/* Dependencies Section */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex justify-between items-center">
-            <CardTitle>Activity Dependencies</CardTitle>
-            <Button onClick={() => setIsAddDependencyModalOpen(true)}>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add Dependency
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <DataTable 
-            columns={columns} 
-            data={dependencies}
-            pageSize={5}
+    <div className="container mx-auto py-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Project Schedule</h1>
+        <div className="space-x-2">
+          <Button
+            onClick={handleFinalizeSchedule}
+            disabled={isProcessingSchedule}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <CalendarClock className="mr-2 h-4 w-4" />
+            {isProcessingSchedule ? "Processing..." : "Finalize Schedule"}
+          </Button>
+        </div>
+      </div>
+
+      <Tabs defaultValue="schedule" value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="schedule">Schedule</TabsTrigger>
+          <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
+          <TabsTrigger value="resources">Resources</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="schedule" className="space-y-4">
+          <GanttChart 
+            projectId={projectId} 
+            onAddActivity={handleAddActivity}
+            onAddTask={handleAddTask}
           />
-        </CardContent>
-      </Card>
+        </TabsContent>
+
+        <TabsContent value="dependencies" className="space-y-4">
+          {/* Dependencies content here */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center justify-between">
+                <span>Activity Dependencies</span>
+                <Button onClick={() => setIsAddDependencyModalOpen(true)} variant="outline" size="sm">
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  Add Dependency
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Dependencies table */}
+              <div className="rounded-md border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="p-2 text-left font-medium">Predecessor</th>
+                      <th className="p-2 text-left font-medium">Type</th>
+                      <th className="p-2 text-left font-medium">Lag</th>
+                      <th className="p-2 text-left font-medium">Successor</th>
+                      <th className="p-2 text-center font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dependencies.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                          No dependencies created yet. Add some dependencies to see them here.
+                        </td>
+                      </tr>
+                    ) : (
+                      dependencies.map((dep) => {
+                        const predecessor = wbsItems.find((item) => item.id === dep.predecessorId);
+                        const successor = wbsItems.find((item) => item.id === dep.successorId);
+                        
+                        return (
+                          <tr key={`${dep.predecessorId}-${dep.successorId}`} className="border-t">
+                            <td className="p-2">{predecessor?.name || `Item #${dep.predecessorId}`}</td>
+                            <td className="p-2">
+                              <Badge variant="outline">{dep.type || "FS"}</Badge>
+                            </td>
+                            <td className="p-2">{dep.lag || 0} days</td>
+                            <td className="p-2">{successor?.name || `Item #${dep.successorId}`}</td>
+                            <td className="p-2 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteDependency(dep.predecessorId, dep.successorId)}
+                              >
+                                <X className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="resources" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center justify-between">
+                <span>Task Management</span>
+                <div className="space-x-2">
+                  <Button onClick={() => setIsImportTasksModalOpen(true)} variant="outline" size="sm">
+                    <ImportIcon className="mr-2 h-4 w-4" />
+                    Import Tasks
+                  </Button>
+                  <Button onClick={() => {
+                    setSelectedActivityId(null);
+                    setIsAddTaskModalOpen(true);
+                  }} variant="default" size="sm">
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Add Task
+                  </Button>
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {tasks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <ListTodo className="h-12 w-12 text-gray-400 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">No Tasks Created</h3>
+                  <p className="text-muted-foreground mb-4 max-w-md">
+                    Tasks are the smallest unit of work assigned to resources. Create tasks for activities to track individual work items.
+                  </p>
+                  <div className="flex space-x-4">
+                    <Button onClick={() => setIsAddTaskModalOpen(true)} variant="default">
+                      <PlusCircle className="mr-2 h-4 w-4" />
+                      Add Task
+                    </Button>
+                    <Button onClick={() => setIsImportTasksModalOpen(true)} variant="outline">
+                      <FileUp className="mr-2 h-4 w-4" />
+                      Import from CSV
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <DataTable columns={taskColumns} data={tasks} />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Add Dependency Modal */}
-      <Dialog 
-        open={isAddDependencyModalOpen} 
-        onOpenChange={(open) => {
-          if (!open) {
-            resetDependencyForm();
-          }
-          setIsAddDependencyModalOpen(open);
-        }}
-      >
-        <DialogContent>
+      <Dialog open={isAddDependencyModalOpen} onOpenChange={setIsAddDependencyModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Add Dependency</DialogTitle>
           </DialogHeader>
-          
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Predecessor Activity</label>
-              <Select
-                value={predecessorId?.toString() || ""}
-                onValueChange={(value) => setPredecessorId(parseInt(value))}
-              >
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Predecessor</label>
+              <Select value={predecessorId?.toString()} onValueChange={(value) => setPredecessorId(parseInt(value))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select predecessor" />
                 </SelectTrigger>
                 <SelectContent>
                   {wbsItems
-                    .filter(item => item.type === "Activity") // Only activities can have dependencies
+                    .filter((item) => item.type === "Activity")
                     .map((item) => (
                       <SelectItem key={`pred-${item.id}`} value={item.id.toString()}>
-                        {item.code} - {item.name}
+                        {item.name}
                       </SelectItem>
                     ))}
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="flex items-center justify-center">
-              <div className="flex flex-col items-center">
-                <ArrowRightCircle className="h-6 w-6 text-gray-400 mb-1" />
-                <div className="flex gap-2 items-center">
-                  <Select
-                    value={dependencyType}
-                    onValueChange={setDependencyType}
-                  >
-                    <SelectTrigger className="w-[80px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="FS">FS</SelectItem>
-                      <SelectItem value="SS">SS</SelectItem>
-                      <SelectItem value="FF">FF</SelectItem>
-                      <SelectItem value="SF">SF</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  
-                  <div className="flex items-center">
-                    <span className="text-sm mr-2">Lag:</span>
-                    <input
-                      type="number"
-                      value={lag}
-                      onChange={(e) => setLag(parseInt(e.target.value) || 0)}
-                      className="w-16 px-2 py-1 border rounded-md"
-                      min="0"
-                    />
-                    <span className="text-sm ml-1">days</span>
-                  </div>
-                </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Type</label>
+                <Select value={dependencyType} onValueChange={setDependencyType}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FS">Finish-to-Start (FS)</SelectItem>
+                    <SelectItem value="SS">Start-to-Start (SS)</SelectItem>
+                    <SelectItem value="FF">Finish-to-Finish (FF)</SelectItem>
+                    <SelectItem value="SF">Start-to-Finish (SF)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Lag (days)</label>
+                <input
+                  type="number"
+                  className="w-full rounded-md border border-input py-2 px-3"
+                  value={lag}
+                  onChange={(e) => setLag(parseInt(e.target.value) || 0)}
+                  min={0}
+                />
               </div>
             </div>
-            
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Successor Activity</label>
-              <Select
-                value={successorId?.toString() || ""}
-                onValueChange={(value) => setSuccessorId(parseInt(value))}
-              >
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Successor</label>
+              <Select value={successorId?.toString()} onValueChange={(value) => setSuccessorId(parseInt(value))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select successor" />
                 </SelectTrigger>
                 <SelectContent>
                   {wbsItems
-                    .filter(item => item.type === "Activity" && item.id !== predecessorId) // Filter out the selected predecessor
+                    .filter((item) => item.type === "Activity" && item.id !== predecessorId)
                     .map((item) => (
                       <SelectItem key={`succ-${item.id}`} value={item.id.toString()}>
-                        {item.code} - {item.name}
+                        {item.name}
                       </SelectItem>
                     ))}
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="text-sm text-gray-500">
-              <p><strong>FS (Finish-to-Start):</strong> Successor can't start until predecessor finishes</p>
-              <p><strong>SS (Start-to-Start):</strong> Successor can't start until predecessor starts</p>
-              <p><strong>FF (Finish-to-Finish):</strong> Successor can't finish until predecessor finishes</p>
-              <p><strong>SF (Start-to-Finish):</strong> Successor can't finish until predecessor starts</p>
-            </div>
           </div>
-          
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddDependencyModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleAddDependency} disabled={createDependency.isPending}>
-              {createDependency.isPending ? 'Creating...' : 'Add Dependency'}
+            <Button 
+              onClick={() => {
+                if (predecessorId && successorId) {
+                  createDependency.mutate({
+                    predecessorId,
+                    successorId,
+                    type: dependencyType,
+                    lag,
+                  });
+                }
+              }}
+              disabled={!predecessorId || !successorId || predecessorId === successorId}
+            >
+              Add Dependency
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add Activity Modal */}
+      <AddWbsModal
+        isOpen={isAddActivityModalOpen}
+        onClose={() => setIsAddActivityModalOpen(false)}
+        projectId={projectId}
+        parentId={selectedParentId}
+        type="Activity"
+      />
+
+      {/* Add Task Modal */}
+      <AddTaskModal
+        isOpen={isAddTaskModalOpen}
+        onClose={() => setIsAddTaskModalOpen(false)}
+        onAdd={handleCreateTask}
+        activities={wbsItems}
+        selectedActivityId={selectedActivityId}
+      />
+
+      {/* Import Tasks Modal */}
+      <ImportTaskModal
+        isOpen={isImportTasksModalOpen}
+        onClose={() => setIsImportTasksModalOpen(false)}
+        onImport={handleImportTasks}
+        activities={wbsItems}
+      />
     </div>
   );
 }

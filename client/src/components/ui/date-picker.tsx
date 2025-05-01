@@ -12,8 +12,8 @@ import {
 import { Input } from "@/components/ui/input"
 
 interface DatePickerProps {
-  date: Date | undefined
-  setDate: (date: Date | undefined) => void
+  value?: string | Date | undefined
+  onChange: (date: string) => void
   className?: string
   placeholder?: string
   disabled?: boolean
@@ -22,8 +22,8 @@ interface DatePickerProps {
 }
 
 export function DatePicker({
-  date,
-  setDate,
+  value,
+  onChange,
   className,
   placeholder = "Select date",
   disabled = false,
@@ -31,7 +31,20 @@ export function DatePicker({
   onBlur,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
-  const [dateInput, setDateInput] = React.useState<string>(date ? format(date, "yyyy-MM-dd") : "")
+  
+  // Convert string or Date to Date object for internal use
+  const getDateValue = (): Date | undefined => {
+    if (!value) return undefined;
+    if (value instanceof Date) return value;
+    const date = new Date(value);
+    return !isNaN(date.getTime()) ? date : undefined;
+  }
+  
+  const date = getDateValue();
+  
+  const [dateInput, setDateInput] = React.useState<string>(
+    date ? format(date, "yyyy-MM-dd") : ""
+  )
 
   // Update the input field when date prop changes
   React.useEffect(() => {
@@ -40,21 +53,32 @@ export function DatePicker({
     } else {
       setDateInput("")
     }
-  }, [date])
+  }, [value])
 
   // Handle direct input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
-    setDateInput(value)
+    const inputValue = e.target.value;
+    setDateInput(inputValue);
     
-    if (value) {
-      const inputDate = new Date(value)
+    if (inputValue) {
+      const inputDate = new Date(inputValue);
       if (!isNaN(inputDate.getTime())) {
-        setDate(inputDate)
+        onChange(inputValue);
       }
     } else {
-      setDate(undefined)
+      onChange("");
     }
+  }
+
+  // Handle calendar selection
+  const handleCalendarSelect = (date: Date | undefined) => {
+    if (date) {
+      const formattedDate = format(date, "yyyy-MM-dd");
+      onChange(formattedDate);
+    } else {
+      onChange("");
+    }
+    setOpen(false);
   }
 
   // Handle input blur
@@ -89,10 +113,7 @@ export function DatePicker({
           <Calendar
             mode="single"
             selected={date}
-            onSelect={(date) => {
-              setDate(date)
-              setOpen(false)
-            }}
+            onSelect={handleCalendarSelect}
             disabled={disabledDates}
             initialFocus
           />
@@ -110,3 +131,4 @@ export function DatePicker({
     </div>
   )
 }
+

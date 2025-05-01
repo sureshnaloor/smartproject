@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { WbsItem, Dependency } from "@shared/schema";
 import { formatShortDate, calculateDependencyConstraints } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Calendar, PlusCircle, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, PlusCircle, Loader2, ListTodo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -26,6 +26,7 @@ const TooltipPortal = TooltipPrimitive.Portal;
 interface GanttChartProps {
   projectId: number;
   onAddActivity?: (parentId: number) => void;
+  onAddTask?: (activityId: number) => void;
 }
 
 interface GanttItemProps {
@@ -37,6 +38,7 @@ interface GanttItemProps {
   onToggleExpand: (id: number) => void;
   expandedItems?: Record<number, boolean>;
   onAddActivity?: (parentId: number) => void;
+  onAddTask?: (activityId: number) => void;
   isBudgetFinalized?: boolean;
   loadingItems: Set<number>;
 }
@@ -57,7 +59,7 @@ const formatDate = (date: string | null | undefined): string => {
   });
 };
 
-export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
+export function GanttChart({ projectId, onAddActivity, onAddTask }: GanttChartProps) {
   const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
   const [timeScale, setTimeScale] = useState<"weeks" | "months">("months");
   const [showCalendar, setShowCalendar] = useState<boolean>(true);
@@ -441,6 +443,7 @@ export function GanttChart({ projectId, onAddActivity }: GanttChartProps) {
               onToggleExpand={toggleExpand}
               expandedItems={expandedItems}
               onAddActivity={onAddActivity}
+              onAddTask={onAddTask}
               isBudgetFinalized={isBudgetFinalized}
               loadingItems={loadingItems}
             />
@@ -641,6 +644,7 @@ function GanttItem({
   onToggleExpand,
   expandedItems = {},
   onAddActivity,
+  onAddTask,
   isBudgetFinalized,
   loadingItems
 }: GanttItemProps) {
@@ -729,6 +733,17 @@ function GanttItem({
                 title="Add Activity"
               >
                 <PlusCircle className="h-4 w-4 text-blue-500" />
+              </Button>
+            )}
+            {item.type === "Activity" && onAddTask && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 ml-2"
+                onClick={() => onAddTask(item.id)}
+                title="Add Task"
+              >
+                <ListTodo className="h-4 w-4 text-green-500" />
               </Button>
             )}
           </div>
