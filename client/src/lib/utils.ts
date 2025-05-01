@@ -20,7 +20,7 @@ export function formatCurrency(amount: number | string | null | undefined, curre
   }).format(numAmount);
 }
 
-function getCurrencySymbol(currency: string): string {
+export function getCurrencySymbol(currency: string): string {
   switch (currency) {
     case "USD":
       return "$";

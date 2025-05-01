@@ -12,9 +12,12 @@ import {
   wbsItems,
   dependencies,
   costEntries,
+  Task,
+  InsertTask,
+  tasks
 } from "@shared/schema";
 import { db } from "./db";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, inArray, sql } from "drizzle-orm";
 
 // Storage interface
 export interface IStorage {
@@ -35,6 +38,7 @@ export interface IStorage {
 
   // Dependency methods
   getDependencies(wbsItemId: number): Promise<Dependency[]>;
+  getProjectDependencies(projectId: number): Promise<Dependency[]>;
   createDependency(dependency: InsertDependency): Promise<Dependency>;
   deleteDependency(predecessorId: number, successorId: number): Promise<boolean>;
 
@@ -43,6 +47,15 @@ export interface IStorage {
   createCostEntry(costEntry: InsertCostEntry): Promise<CostEntry>;
   createCostEntries(costEntries: InsertCostEntry[]): Promise<CostEntry[]>;
   deleteCostEntry(id: number): Promise<boolean>;
+  
+  // Task methods
+  getTasks(projectId: number): Promise<Task[]>;
+  getTasksByActivity(activityId: number): Promise<Task[]>;
+  getTask(id: number): Promise<Task | undefined>;
+  createTask(task: InsertTask): Promise<Task>;
+  updateTask(id: number, task: Partial<InsertTask>): Promise<Task | undefined>;
+  deleteTask(id: number): Promise<boolean>;
+  createTasks(tasksList: InsertTask[]): Promise<Task[]>;
 }
 
 // Database storage implementation using Drizzle ORM
@@ -65,9 +78,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateProject(id: number, project: Partial<InsertProject>): Promise<Project | undefined> {
+    // Make sure budget is converted to string if it exists
+    const updatedValues = { ...project };
+    if (updatedValues.budget !== undefined) {
+      updatedValues.budget = updatedValues.budget.toString();
+    }
+
     const [updatedProject] = await db
       .update(projects)
-      .set(project)
+      .set(updatedValues)
       .where(eq(projects.id, id))
       .returning();
     return updatedProject;
@@ -90,34 +109,57 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createWbsItem(wbsItem: InsertWbsItem): Promise<WbsItem> {
+    // Make sure budgeted cost is converted to string
+    const insertValues = {
+      ...wbsItem,
+      budgetedCost: wbsItem.budgetedCost.toString(),
+    };
+
     const [newWbsItem] = await db
       .insert(wbsItems)
       .values({
-        ...wbsItem,
-        actualCost: 0,
-        percentComplete: 0,
+        ...insertValues,
+        actualCost: "0", // Use string for numeric fields
+        percentComplete: "0",
       })
       .returning();
     return newWbsItem;
   }
 
   async updateWbsItem(id: number, wbsItem: Partial<InsertWbsItem>): Promise<WbsItem | undefined> {
+    // Convert budgetedCost to string if it exists
+    const updatedValues = { ...wbsItem };
+    if (updatedValues.budgetedCost !== undefined) {
+      updatedValues.budgetedCost = updatedValues.budgetedCost.toString();
+    }
+
+    // Convert dates to ISO strings if they exist
+    if (updatedValues.startDate) {
+      updatedValues.startDate = updatedValues.startDate.toISOString();
+    }
+    if (updatedValues.endDate) {
+      updatedValues.endDate = updatedValues.endDate.toISOString();
+    }
+
     const [updatedWbsItem] = await db
       .update(wbsItems)
-      .set(wbsItem)
+      .set(updatedValues)
       .where(eq(wbsItems.id, id))
       .returning();
     return updatedWbsItem;
   }
 
   async updateWbsProgress(id: number, progress: UpdateWbsProgress): Promise<WbsItem | undefined> {
+    // Convert values to appropriate types for database
+    const updateValues = {
+      percentComplete: progress.percentComplete.toString(),
+      actualStartDate: progress.actualStartDate ? progress.actualStartDate.toISOString() : null,
+      actualEndDate: progress.actualEndDate ? progress.actualEndDate.toISOString() : null,
+    };
+
     const [updatedWbsItem] = await db
       .update(wbsItems)
-      .set({
-        percentComplete: progress.percentComplete,
-        actualStartDate: progress.actualStartDate,
-        actualEndDate: progress.actualEndDate,
-      })
+      .set(updateValues)
       .where(eq(wbsItems.id, id))
       .returning();
     return updatedWbsItem;
@@ -140,6 +182,28 @@ export class DatabaseStorage implements IStorage {
           eq(dependencies.successorId, wbsItemId)
         )
       );
+  }
+
+  async getProjectDependencies(projectId: number): Promise<Dependency[]> {
+    // First get all WBS items for this project
+    const wbsItems = await this.getWbsItems(projectId);
+    if (!wbsItems.length) return [];
+    
+    // Extract all WBS item IDs
+    const wbsItemIds = wbsItems.map(item => item.id);
+    
+    // Find all dependencies where either predecessor or successor belongs to this project
+    const result = await db
+      .select()
+      .from(dependencies)
+      .where(
+        or(
+          inArray(dependencies.predecessorId, wbsItemIds),
+          inArray(dependencies.successorId, wbsItemIds)
+        )
+      );
+      
+    return result;
   }
 
   async createDependency(dependency: InsertDependency): Promise<Dependency> {
@@ -174,7 +238,11 @@ export class DatabaseStorage implements IStorage {
   async createCostEntry(costEntry: InsertCostEntry): Promise<CostEntry> {
     const [newCostEntry] = await db
       .insert(costEntries)
-      .values(costEntry)
+      .values({
+        ...costEntry,
+        amount: costEntry.amount.toString(),
+        entryDate: new Date(costEntry.entryDate).toISOString()
+      })
       .returning();
     
     // Update the actual cost of the WBS item
@@ -196,10 +264,14 @@ export class DatabaseStorage implements IStorage {
       for (const entry of costEntries) {
         const [newEntry] = await tx
           .insert(costEntries)
-          .values(entry)
+          .values({
+            ...entry,
+            amount: entry.amount.toString(),
+            entryDate: new Date(entry.entryDate).toISOString()
+          })
           .returning();
         
-        entries.push(newEntry);
+        entries.push(newEntry as CostEntry); // Type assertion
         
         // Track amounts by WBS item ID
         const currentAmount = entriesByWbsItemId.get(entry.wbsItemId) || 0;
@@ -210,7 +282,8 @@ export class DatabaseStorage implements IStorage {
     });
     
     // Update the actual costs for all affected WBS items
-    for (const [wbsItemId, amount] of entriesByWbsItemId.entries()) {
+    for (const wbsItemId of entriesByWbsItemId.keys()) {
+      const amount = entriesByWbsItemId.get(wbsItemId) || 0;
       await this.updateWbsItemCost(wbsItemId, amount);
     }
     
@@ -253,9 +326,222 @@ export class DatabaseStorage implements IStorage {
       
       await db
         .update(wbsItems)
-        .set({ actualCost: newActualCost })
+        .set({ actualCost: newActualCost.toString() }) // Convert number to string
         .where(eq(wbsItems.id, wbsItemId));
     }
+  }
+
+  // Task methods
+  async getTasks(projectId: number): Promise<Task[]> {
+    return await db.select().from(tasks).where(eq(tasks.projectId, projectId));
+  }
+
+  async getTasksByActivity(activityId: number): Promise<Task[]> {
+    return await db.select().from(tasks).where(eq(tasks.activityId, activityId));
+  }
+
+  async getTask(id: number): Promise<Task | undefined> {
+    const result = await db.select().from(tasks).where(eq(tasks.id, id));
+    return result[0];
+  }
+
+  async createTask(task: InsertTask): Promise<Task> {
+    // Validate that the referenced activity exists and is an activity type
+    const activity = await this.getWbsItem(task.activityId);
+    if (!activity) {
+      throw new Error("Activity not found");
+    }
+    
+    if (activity.type !== "Activity") {
+      throw new Error("Tasks can only be assigned to activities");
+    }
+    
+    // Calculate endDate if not provided but duration is
+    let taskToInsert = { ...task };
+    if (!taskToInsert.endDate && taskToInsert.startDate && taskToInsert.duration) {
+      const startDate = new Date(taskToInsert.startDate);
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + Number(taskToInsert.duration));
+      taskToInsert.endDate = endDate;
+    }
+    
+    // Calculate duration if not provided but endDate is
+    if (!taskToInsert.duration && taskToInsert.startDate && taskToInsert.endDate) {
+      const startDate = new Date(taskToInsert.startDate);
+      const endDate = new Date(taskToInsert.endDate);
+      const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+      taskToInsert.duration = durationDays;
+    }
+
+    // Convert data for DB
+    const dbTask = {
+      name: taskToInsert.name,
+      description: taskToInsert.description,
+      activityId: taskToInsert.activityId,
+      projectId: taskToInsert.projectId,
+      percentComplete: taskToInsert.percentComplete?.toString() || "0",
+      startDate: taskToInsert.startDate ? new Date(taskToInsert.startDate).toISOString() : null,
+      endDate: taskToInsert.endDate ? new Date(taskToInsert.endDate).toISOString() : null,
+      duration: taskToInsert.duration ? taskToInsert.duration.toString() : null
+    };
+    
+    const [newTask] = await db
+      .insert(tasks)
+      .values(dbTask)
+      .returning();
+    
+    return newTask;
+  }
+
+  async updateTask(id: number, taskUpdate: Partial<InsertTask>): Promise<Task | undefined> {
+    // Get the current task
+    const currentTask = await this.getTask(id);
+    if (!currentTask) {
+      throw new Error("Task not found");
+    }
+    
+    // If activity ID is being changed, validate the new activity
+    if (taskUpdate.activityId && taskUpdate.activityId !== currentTask.activityId) {
+      const newActivity = await this.getWbsItem(taskUpdate.activityId);
+      if (!newActivity) {
+        throw new Error("Activity not found");
+      }
+      
+      if (newActivity.type !== "Activity") {
+        throw new Error("Tasks can only be assigned to activities");
+      }
+    }
+    
+    // Handle date and duration calculations
+    let taskToUpdate = { ...taskUpdate };
+    
+    // If start date is changing but duration remains, recalculate end date
+    if (
+      taskToUpdate.startDate && 
+      !taskToUpdate.endDate && 
+      !taskToUpdate.duration && 
+      currentTask.duration
+    ) {
+      const startDate = new Date(taskToUpdate.startDate);
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + Number(currentTask.duration));
+      taskToUpdate.endDate = endDate;
+    }
+    
+    // If end date is changing but duration remains, recalculate duration
+    if (
+      taskToUpdate.endDate && 
+      !taskToUpdate.duration && 
+      currentTask.startDate
+    ) {
+      const startDate = new Date(taskToUpdate.startDate || currentTask.startDate);
+      const endDate = new Date(taskToUpdate.endDate);
+      const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+      taskToUpdate.duration = durationDays;
+    }
+    
+    // If duration is changing but start date remains, recalculate end date
+    if (
+      taskToUpdate.duration && 
+      !taskToUpdate.endDate && 
+      currentTask.startDate
+    ) {
+      const startDate = new Date(taskToUpdate.startDate || currentTask.startDate);
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + Number(taskToUpdate.duration));
+      taskToUpdate.endDate = endDate;
+    }
+    
+    // Convert values for database
+    const dbTaskUpdate: any = {};
+    
+    if (taskToUpdate.name !== undefined) dbTaskUpdate.name = taskToUpdate.name;
+    if (taskToUpdate.description !== undefined) dbTaskUpdate.description = taskToUpdate.description;
+    if (taskToUpdate.activityId !== undefined) dbTaskUpdate.activityId = taskToUpdate.activityId;
+    if (taskToUpdate.projectId !== undefined) dbTaskUpdate.projectId = taskToUpdate.projectId;
+    if (taskToUpdate.percentComplete !== undefined) dbTaskUpdate.percentComplete = taskToUpdate.percentComplete.toString();
+    if (taskToUpdate.startDate !== undefined) dbTaskUpdate.startDate = new Date(taskToUpdate.startDate).toISOString();
+    if (taskToUpdate.endDate !== undefined) dbTaskUpdate.endDate = new Date(taskToUpdate.endDate).toISOString();
+    if (taskToUpdate.duration !== undefined) dbTaskUpdate.duration = taskToUpdate.duration.toString();
+    
+    const [updatedTask] = await db
+      .update(tasks)
+      .set(dbTaskUpdate)
+      .where(eq(tasks.id, id))
+      .returning();
+    
+    return updatedTask;
+  }
+
+  async deleteTask(id: number): Promise<boolean> {
+    const result = await db
+      .delete(tasks)
+      .where(eq(tasks.id, id))
+      .returning();
+    
+    return result.length > 0;
+  }
+
+  async createTasks(tasksList: InsertTask[]): Promise<Task[]> {
+    if (tasksList.length === 0) {
+      return [];
+    }
+    
+    // Validate that all activities exist and are activity type
+    const activityIds = Array.from(new Set(tasksList.map(t => t.activityId)));
+    const activities = await Promise.all(
+      activityIds.map(id => this.getWbsItem(id))
+    );
+    
+    // Check if all activities exist
+    if (activities.some(a => !a)) {
+      throw new Error("One or more activities not found");
+    }
+    
+    // Check if all are activity type
+    if (activities.some(a => a!.type !== "Activity")) {
+      throw new Error("Tasks can only be assigned to activities");
+    }
+    
+    // Process each task to ensure dates and durations are properly set
+    const processedTasks = tasksList.map(task => {
+      let processedTask = { ...task };
+      
+      // Calculate endDate if not provided but duration is
+      if (!processedTask.endDate && processedTask.startDate && processedTask.duration) {
+        const startDate = new Date(processedTask.startDate);
+        const endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + Number(processedTask.duration));
+        processedTask.endDate = endDate;
+      }
+      
+      // Calculate duration if not provided but endDate is
+      if (!processedTask.duration && processedTask.startDate && processedTask.endDate) {
+        const startDate = new Date(processedTask.startDate);
+        const endDate = new Date(processedTask.endDate);
+        const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        processedTask.duration = durationDays;
+      }
+      
+      // Convert data for DB
+      return {
+        name: processedTask.name,
+        description: processedTask.description,
+        activityId: processedTask.activityId,
+        projectId: processedTask.projectId,
+        percentComplete: processedTask.percentComplete?.toString() || "0",
+        startDate: processedTask.startDate ? new Date(processedTask.startDate).toISOString() : null,
+        endDate: processedTask.endDate ? new Date(processedTask.endDate).toISOString() : null,
+        duration: processedTask.duration ? processedTask.duration.toString() : null
+      };
+    });
+    
+    const newTasks = await db
+      .insert(tasks)
+      .values(processedTasks)
+      .returning();
+    
+    return newTasks;
   }
 }
 

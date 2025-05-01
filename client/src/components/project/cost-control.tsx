@@ -24,6 +24,9 @@ export function CostControl({ projectId }: CostControlProps) {
     queryKey: [`/api/projects/${projectId}`],
   });
 
+  // Get the project currency or default to USD if not available
+  const projectCurrency = project?.currency || "USD";
+
   // Fetch WBS items for the project
   const { data: wbsItems = [], isLoading } = useQuery<WbsItem[]>({
     queryKey: [`/api/projects/${projectId}/wbs`],
@@ -116,9 +119,9 @@ export function CostControl({ projectId }: CostControlProps) {
                       </span>
                     </div>
                     <div className="text-sm">
-                      <span className="font-mono">{formatCurrency(item.actualCost)}</span>
+                      <span className="font-mono">{formatCurrency(item.actualCost, projectCurrency)}</span>
                       <span className="text-gray-500 mx-1">/</span>
-                      <span className="font-mono">{formatCurrency(item.budgetedCost)}</span>
+                      <span className="font-mono">{formatCurrency(item.budgetedCost, projectCurrency)}</span>
                     </div>
                   </div>
                   <div className="w-full h-6 bg-gray-100 rounded-md overflow-hidden">
@@ -146,7 +149,7 @@ export function CostControl({ projectId }: CostControlProps) {
                         ? "text-red-600"
                         : "text-green-600"
                     )}>
-                      {formatCurrency(Number(item.budgetedCost) - Number(item.actualCost))} 
+                      {formatCurrency(Number(item.budgetedCost) - Number(item.actualCost), projectCurrency)} 
                       {Number(item.actualCost) > Number(item.budgetedCost) ? " overrun" : " remaining"}
                     </span>
                   </div>
@@ -158,9 +161,9 @@ export function CostControl({ projectId }: CostControlProps) {
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-sm font-semibold">Project Total</span>
                   <div className="text-sm font-semibold">
-                    <span className="font-mono">{formatCurrency(groupedItems.totalActual)}</span>
+                    <span className="font-mono">{formatCurrency(groupedItems.totalActual, projectCurrency)}</span>
                     <span className="text-gray-500 mx-1">/</span>
-                    <span className="font-mono">{formatCurrency(groupedItems.totalBudget)}</span>
+                    <span className="font-mono">{formatCurrency(groupedItems.totalBudget, projectCurrency)}</span>
                   </div>
                 </div>
                 <div className="w-full h-6 bg-gray-100 rounded-md overflow-hidden">
@@ -186,7 +189,7 @@ export function CostControl({ projectId }: CostControlProps) {
                       ? "text-red-600"
                       : "text-green-600"
                   )}>
-                    {formatCurrency(groupedItems.totalBudget - groupedItems.totalActual)} 
+                    {formatCurrency(groupedItems.totalBudget - groupedItems.totalActual, projectCurrency)} 
                     {groupedItems.totalActual > groupedItems.totalBudget ? " overrun" : " remaining"}
                   </span>
                 </div>
@@ -240,7 +243,7 @@ export function CostControl({ projectId }: CostControlProps) {
           <div>
             <h4 className="text-sm font-medium mb-2">Earned Value</h4>
             <div className="text-2xl font-semibold font-mono">
-              {formatCurrency(groupedItems.totalEarnedValue)}
+              {formatCurrency(groupedItems.totalEarnedValue, projectCurrency)}
             </div>
             <div className="text-xs text-gray-500 mt-1">
               Value of work completed based on budget and progress
@@ -253,7 +256,7 @@ export function CostControl({ projectId }: CostControlProps) {
             <div className="flex items-center">
               <div className="text-2xl font-semibold font-mono">
                 {groupedItems.costVariance > 0 ? "+" : ""}
-                {formatCurrency(groupedItems.costVariance)}
+                {formatCurrency(groupedItems.costVariance, projectCurrency)}
               </div>
               <div className={cn(
                 "ml-3 px-2 py-1 rounded text-sm font-medium",

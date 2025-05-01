@@ -1,27 +1,56 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProjectSchema, insertWbsItemSchema, insertDependencySchema, insertCostEntrySchema, updateWbsProgressSchema, csvImportSchema } from "@shared/schema";
+import { insertProjectSchema, insertWbsItemSchema, insertDependencySchema, insertCostEntrySchema, updateWbsProgressSchema, csvImportSchema, insertTaskSchema, InsertTask } from "@shared/schema";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
+import fileUpload from "express-fileupload";
+// Create an inline implementation for cors
+const cors = () => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  };
+};
+import { DatabaseStorage } from "./storage";
+// Create uploadMiddleware using express-fileupload
+const uploadMiddleware = fileUpload({
+  useTempFiles: true,
+  tempFileDir: '/tmp/',
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+});
+// Create an inline error handler
+const handleError = (err: unknown, res: Response) => {
+  console.error("Server error:", err);
+  
+  if (err instanceof ZodError) {
+    const validationError = fromZodError(err);
+    return res.status(400).json({ 
+      message: "Validation error: " + validationError.message,
+      errors: err.errors 
+    });
+  }
+  
+  if (err instanceof Error) {
+    return res.status(400).json({ message: err.message });
+  }
+  
+  return res.status(500).json({ message: "An unexpected error occurred" });
+};
+import { WbsItem, Dependency } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
-  // Error handling middleware
-  const handleError = (err: unknown, res: Response) => {
-    console.error(err);
-    
-    if (err instanceof ZodError) {
-      return res.status(400).json({ 
-        message: "Validation error", 
-        errors: fromZodError(err).message
-      });
-    }
-    
-    return res.status(500).json({ message: "Internal server error" });
-  };
+  // Middleware
+  app.use(cors());
+  app.use(uploadMiddleware);
 
   // Project routes
   app.get("/api/projects", async (req: Request, res: Response) => {
@@ -917,7 +946,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             wbsItemsByCode.set(result.code, result);
           }
         } catch (error) {
-          errors.push(`Row ${i + 1}: Failed to process WBS item - ${error.message}`);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push(`Row ${i + 1}: Failed to process WBS item - ${errorMessage}`);
         }
       }
       
@@ -938,6 +968,624 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (err) {
       console.error("Error importing WBS items:", err);
+      handleError(err, res);
+    }
+  });
+
+  // Add endpoint to get all dependencies for a project
+  app.get("/api/projects/:projectId/dependencies", async (req: Request, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ message: "Invalid project ID" });
+      }
+
+      // Use the new method to get all dependencies for the project directly
+      const dependencies = await storage.getProjectDependencies(projectId);
+      res.json(dependencies);
+    } catch (err: unknown) {
+      handleError(err, res);
+    }
+  });
+
+  app.post("/api/wbs/activities/import", async (req: Request, res: Response) => {
+    try {
+      const { projectId, workPackageId, csvData } = req.body;
+      
+      if (!projectId || !csvData || !Array.isArray(csvData)) {
+        return res.status(400).json({ message: "Invalid request body" });
+      }
+
+      // Check if project exists
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      // Get all WBS items for the project to map codes to IDs
+      const wbsItems = await storage.getWbsItems(projectId);
+      const wbsItemsByCode = new Map(wbsItems.map(item => [item.code, item]));
+      
+      // Check if the workPackage exists if provided
+      let parentWorkPackage = null;
+      if (workPackageId) {
+        parentWorkPackage = wbsItems.find(item => item.id === workPackageId);
+        if (!parentWorkPackage) {
+          return res.status(404).json({ message: "Work Package not found" });
+        }
+        if (parentWorkPackage.type !== "WorkPackage") {
+          return res.status(400).json({ message: "Provided ID is not a Work Package" });
+        }
+      }
+      
+      // Track any validation errors
+      const errors = [];
+      const results = [];
+
+      // Process each activity in the CSV data
+      for (let i = 0; i < csvData.length; i++) {
+        const row = csvData[i];
+        
+        // Skip invalid rows
+        if (!row.code) {
+          errors.push(`Row ${i + 1}: Missing required activity code`);
+          continue;
+        }
+        
+        if (!row.name) {
+          errors.push(`Row ${i + 1}: Missing required activity name`);
+          continue;
+        }
+        
+        // Find the WBS item by code
+        const existingItem = wbsItemsByCode.get(row.code);
+        const isUpdate = !!existingItem;
+
+        // Parse dates if provided
+        let startDate = null;
+        let endDate = null;
+        let duration = null;
+        
+        if (row.startDate) {
+          try {
+            startDate = new Date(row.startDate);
+            if (isNaN(startDate.getTime())) {
+              errors.push(`Row ${i + 1}: Invalid startDate format`);
+              continue;
+            }
+          } catch (e) {
+            errors.push(`Row ${i + 1}: Invalid startDate format`);
+            continue;
+          }
+        } else {
+          errors.push(`Row ${i + 1}: startDate is required for Activities`);
+          continue;
+        }
+        
+        if (row.endDate) {
+          try {
+            endDate = new Date(row.endDate);
+            if (isNaN(endDate.getTime())) {
+              errors.push(`Row ${i + 1}: Invalid endDate format`);
+              continue;
+            }
+          } catch (e) {
+            errors.push(`Row ${i + 1}: Invalid endDate format`);
+            continue;
+          }
+        }
+        
+        if (row.duration) {
+          duration = Number(row.duration);
+          if (isNaN(duration) || duration <= 0) {
+            errors.push(`Row ${i + 1}: Duration must be a positive number`);
+            continue;
+          }
+        }
+        
+        // For new activities, require either duration or endDate
+        if (!isUpdate && !row.duration && !row.endDate) {
+          errors.push(`Row ${i + 1}: Either duration or endDate must be provided for new activities`);
+          continue;
+        }
+        
+        // Calculate missing values
+        if (startDate && endDate && !duration) {
+          // Calculate duration from start and end dates
+          const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+          duration = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include end day
+        } else if (startDate && duration && !endDate) {
+          // Calculate end date from start date and duration
+          endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + duration - 1); // -1 because duration includes the start day
+        }
+        
+        // Ensure dates are consistent
+        if (startDate && endDate && startDate > endDate) {
+          errors.push(`Row ${i + 1}: Start date cannot be after end date`);
+          continue;
+        }
+        
+        try {
+          // If existing item and it's an activity, update it
+          if (isUpdate) {
+            if (existingItem.type !== "Activity") {
+              errors.push(`Row ${i + 1}: Item with code '${row.code}' exists but is not an Activity (type: ${existingItem.type})`);
+              continue;
+            }
+            
+            // If workPackageId is specified, validate that the activity belongs to this work package
+            if (workPackageId && existingItem.parentId !== workPackageId) {
+              errors.push(`Row ${i + 1}: Activity with code '${row.code}' exists but belongs to a different Work Package`);
+              continue;
+            }
+            
+            // Update activity data
+            const activityData = {
+              name: row.name,
+              description: row.description || existingItem.description || "",
+              startDate: startDate || undefined,
+              endDate: endDate || undefined,
+              duration: duration || undefined,
+              percentComplete: row.percentComplete !== undefined ? Number(row.percentComplete) : existingItem.percentComplete
+            };
+            
+            // Update the existing activity
+            const updatedItem = await storage.updateWbsItem(existingItem.id, activityData);
+            results.push({ ...updatedItem, status: "updated" });
+          } else {
+            // Create new activity
+            if (!workPackageId) {
+              errors.push(`Row ${i + 1}: Cannot create new activity '${row.code}' without specifying a Work Package`);
+              continue;
+            }
+            
+            if (!parentWorkPackage) {
+              errors.push(`Row ${i + 1}: Parent Work Package not found`);
+              continue;
+            }
+            
+            // Prepare new activity data
+            const newActivity = {
+              projectId,
+              parentId: workPackageId,
+              name: row.name,
+              description: row.description || "",
+              level: parentWorkPackage.level + 1,
+              code: row.code,
+              type: "Activity" as "Summary" | "WorkPackage" | "Activity",
+              budgetedCost: 0, // Activities don't have budget
+              actualCost: 0,
+              percentComplete: row.percentComplete ? Number(row.percentComplete) : 0,
+              startDate: startDate as Date,
+              endDate: endDate || undefined,
+              duration: duration || undefined,
+              isTopLevel: false,
+            };
+            
+            // Create the new activity
+            const createdItem = await storage.createWbsItem(newActivity);
+            results.push({ ...createdItem, status: "created" });
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push(`Row ${i + 1}: Failed to ${isUpdate ? 'update' : 'create'} Activity - ${errorMessage}`);
+        }
+      }
+      
+      // Return errors if any
+      if (errors.length > 0) {
+        return res.status(400).json({
+          message: "Some activities could not be processed",
+          errors,
+          results
+        });
+      }
+      
+      // Return success
+      return res.status(200).json({
+        message: "Activities processed successfully",
+        count: results.length,
+        created: results.filter(r => r.status === "created").length,
+        updated: results.filter(r => r.status === "updated").length,
+        results
+      });
+    } catch (err) {
+      console.error("Error importing activities:", err);
+      handleError(err, res);
+    }
+  });
+
+  // Endpoint for finalizing a project schedule - simplified approach to avoid linter errors
+  app.post("/api/projects/:projectId/schedule/finalize", async (req: Request, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ message: "Invalid project ID" });
+      }
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      // Fetch all WBS items for the project
+      const wbsItems = await storage.getWbsItems(projectId);
+      
+      // Fetch all dependencies for the project
+      const dependencies = await storage.getProjectDependencies(projectId);
+      
+      // Keep track of updated items
+      const updatedItems: any[] = [];
+      const errors: string[] = [];
+
+      // Skip activity items that don't have dates
+      const activitiesWithDates = wbsItems.filter(
+        item => item.type === "Activity" && item.startDate && item.endDate
+      );
+
+      // Create a map for quick lookup
+      const itemMap = new Map();
+      activitiesWithDates.forEach(item => {
+        itemMap.set(item.id, { ...item });
+      });
+      
+      // Group dependencies by successor
+      const successorDeps = new Map();
+      dependencies.forEach(dep => {
+        const sucDeps = successorDeps.get(dep.successorId) || [];
+        sucDeps.push(dep);
+        successorDeps.set(dep.successorId, sucDeps);
+      });
+      
+      // Update dates based on dependencies
+      for (const item of activitiesWithDates) {
+        const deps = successorDeps.get(item.id);
+        if (!deps || deps.length === 0) continue;
+        
+        let newStartDate = item.startDate ? new Date(item.startDate) : new Date();
+        let newEndDate = item.endDate ? new Date(item.endDate) : new Date();
+        let datesChanged = false;
+        
+        for (const dep of deps) {
+          const predecessor = itemMap.get(dep.predecessorId);
+          if (!predecessor) continue;
+          
+          const predStartDate = new Date(predecessor.startDate);
+          const predEndDate = new Date(predecessor.endDate);
+          const lag = dep.lag || 0;
+          
+          // Apply constraints based on dependency type
+          switch (dep.type) {
+            case "FS": // Finish-to-Start: successor can't start until predecessor finishes
+              const fsDate = new Date(predEndDate);
+              fsDate.setDate(fsDate.getDate() + lag);
+              if (fsDate > newStartDate) {
+                // Calculate the shift in days
+                const shiftDays = Math.ceil((fsDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newStartDate = fsDate;
+                newEndDate.setDate(newEndDate.getDate() + shiftDays);
+                datesChanged = true;
+              }
+              break;
+              
+            case "SS": // Start-to-Start: successor can't start until predecessor starts
+              const ssDate = new Date(predStartDate);
+              ssDate.setDate(ssDate.getDate() + lag);
+              if (ssDate > newStartDate) {
+                // Calculate the shift in days
+                const shiftDays = Math.ceil((ssDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newStartDate = ssDate;
+                newEndDate.setDate(newEndDate.getDate() + shiftDays);
+                datesChanged = true;
+              }
+              break;
+              
+            case "FF": // Finish-to-Finish: successor can't finish until predecessor finishes
+              const ffDate = new Date(predEndDate);
+              ffDate.setDate(ffDate.getDate() + lag);
+              if (ffDate > newEndDate) {
+                // Keep the duration the same, shift both dates
+                const duration = Math.ceil((newEndDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newEndDate = ffDate;
+                newStartDate = new Date(newEndDate);
+                newStartDate.setDate(newStartDate.getDate() - duration);
+                datesChanged = true;
+              }
+              break;
+              
+            case "SF": // Start-to-Finish: successor can't finish until predecessor starts
+              const sfDate = new Date(predStartDate);
+              sfDate.setDate(sfDate.getDate() + lag);
+              if (sfDate > newEndDate) {
+                // Keep the duration the same, shift both dates
+                const duration = Math.ceil((newEndDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newEndDate = sfDate;
+                newStartDate = new Date(newEndDate);
+                newStartDate.setDate(newStartDate.getDate() - duration);
+                datesChanged = true;
+              }
+              break;
+          }
+        }
+        
+        // If dates have changed, update the item
+        if (datesChanged) {
+          try {
+            const updatedItem = await storage.updateWbsItem(item.id, {
+              startDate: newStartDate,
+              endDate: newEndDate,
+              duration: Math.ceil((newEndDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+            });
+            
+            updatedItems.push(updatedItem);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            errors.push(`Failed to update item ${item.id} (${item.code}): ${errorMessage}`);
+          }
+        }
+      }
+      
+      return res.status(200).json({
+        message: "Schedule finalized successfully",
+        updatedCount: updatedItems.length,
+        errorCount: errors.length,
+        errors
+      });
+    } catch (err: any) {
+      console.error("Error finalizing schedule:", err);
+      res.status(500).json({ 
+        message: err.message || "Internal server error" 
+      });
+    }
+  });
+
+  // Task routes
+  app.get("/api/projects/:projectId/tasks", async (req: Request, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ message: "Invalid project ID" });
+      }
+
+      const tasks = await storage.getTasks(projectId);
+      res.json(tasks);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.get("/api/activities/:activityId/tasks", async (req: Request, res: Response) => {
+    try {
+      const activityId = parseInt(req.params.activityId);
+      if (isNaN(activityId)) {
+        return res.status(400).json({ message: "Invalid activity ID" });
+      }
+
+      const tasks = await storage.getTasksByActivity(activityId);
+      res.json(tasks);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.get("/api/tasks/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      const task = await storage.getTask(id);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      res.json(task);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.post("/api/tasks", async (req: Request, res: Response) => {
+    try {
+      console.log("Creating task with request body:", JSON.stringify(req.body, null, 2));
+      
+      // Ensure required fields have default values if missing
+      const taskRequest = {
+        ...req.body,
+        percentComplete: req.body.percentComplete ?? 0,
+        projectId: req.body.projectId || null // Will be set from activity later
+      };
+      
+      console.log("Adjusted task request:", JSON.stringify(taskRequest, null, 2));
+      
+      // Pre-validate
+      if (taskRequest.startDate) {
+        // If start date is provided, check that we have either endDate OR duration, but not both
+        if (taskRequest.endDate !== undefined && taskRequest.duration !== undefined) {
+          return res.status(400).json({
+            message: "Validation error: Cannot provide both end date and duration",
+            errors: [{
+              code: "custom",
+              message: "Either end date or duration must be provided, but not both",
+              path: ["endDate"]
+            }]
+          });
+        }
+        
+        // Check that at least one of endDate or duration is provided
+        if (taskRequest.endDate === undefined && taskRequest.duration === undefined) {
+          return res.status(400).json({
+            message: "Validation error: When start date is provided, either end date or duration must be provided",
+            errors: [{
+              code: "custom",
+              message: "When start date is provided, either end date or duration must be provided",
+              path: ["endDate"]
+            }]
+          });
+        }
+      }
+      
+      // Try validation
+      try {
+        // Attempt validation
+        const validationResult = insertTaskSchema.safeParse(taskRequest);
+        if (!validationResult.success) {
+          console.error("Task validation failed:", JSON.stringify(validationResult.error, null, 2));
+          return res.status(400).json({ 
+            message: "Validation error", 
+            errors: validationResult.error.errors
+          });
+        }
+        
+        const taskData = validationResult.data;
+        console.log("Validated task data:", JSON.stringify(taskData, null, 2));
+        
+        // Check if the activity exists and is of type 'Activity'
+        const activity = await storage.getWbsItem(taskData.activityId);
+        if (!activity) {
+          return res.status(404).json({ message: "Activity not found" });
+        }
+        
+        if (activity.type !== "Activity") {
+          return res.status(400).json({ message: "Tasks can only be attached to activities" });
+        }
+        
+        // Set the project ID from the activity
+        taskData.projectId = activity.projectId;
+        
+        // Ensure dates are properly converted to Date objects for storage
+        if (typeof taskData.startDate === 'string' && taskData.startDate) {
+          taskData.startDate = new Date(taskData.startDate);
+        }
+        
+        if (typeof taskData.endDate === 'string' && taskData.endDate) {
+          taskData.endDate = new Date(taskData.endDate);
+        }
+        
+        const task = await storage.createTask(taskData);
+        res.status(201).json(task);
+      } catch (validationError) {
+        console.error("Validation processing error:", validationError);
+        throw validationError;
+      }
+    } catch (err) {
+      console.error("Error creating task:", err);
+      handleError(err, res);
+    }
+  });
+
+  app.post("/api/tasks/bulk", async (req: Request, res: Response) => {
+    try {
+      if (!Array.isArray(req.body)) {
+        return res.status(400).json({ message: "Request body must be an array of tasks" });
+      }
+      
+      // Validate each task in the array
+      const tasksData = req.body.map(task => {
+        try {
+          return insertTaskSchema.parse(task);
+        } catch (err) {
+          throw err;
+        }
+      });
+      
+      // Check if all activities exist and set project IDs
+      for (const task of tasksData) {
+        const activity = await storage.getWbsItem(task.activityId);
+        if (!activity) {
+          return res.status(404).json({ message: `Activity with ID ${task.activityId} not found` });
+        }
+        
+        if (activity.type !== "Activity") {
+          return res.status(400).json({ message: `Item with ID ${task.activityId} is not an activity` });
+        }
+        
+        // Set the project ID from the activity
+        task.projectId = activity.projectId;
+      }
+      
+      const tasks = await storage.createTasks(tasksData);
+      res.status(201).json(tasks);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.patch("/api/tasks/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      const task = await storage.getTask(id);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      // Validate and parse the task data
+      const taskData = z.object({
+        activityId: z.number().optional(),
+        projectId: z.number().optional(),
+        name: z.string().optional(),
+        description: z.string().nullable().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        duration: z.number().optional(),
+        percentComplete: z.number().min(0).max(100).optional(),
+      }).parse(req.body);
+      
+      // If changing activity, check if it exists and is of type 'Activity'
+      if (taskData.activityId && taskData.activityId !== task.activityId) {
+        const activity = await storage.getWbsItem(taskData.activityId);
+        if (!activity) {
+          return res.status(404).json({ message: "Activity not found" });
+        }
+        
+        if (activity.type !== "Activity") {
+          return res.status(400).json({ message: "Tasks can only be attached to activities" });
+        }
+        
+        // Update the project ID if activity is changing
+        taskData.projectId = activity.projectId;
+      }
+
+      // Create a properly typed object for the update
+      const taskDataWithDateConversion: Partial<InsertTask> = { ...taskData };
+      if (taskDataWithDateConversion.startDate) {
+        taskDataWithDateConversion.startDate = new Date(taskDataWithDateConversion.startDate);
+      }
+      if (taskDataWithDateConversion.endDate) {
+        taskDataWithDateConversion.endDate = new Date(taskDataWithDateConversion.endDate);
+      }
+      const updatedTask = await storage.updateTask(id, taskDataWithDateConversion);
+      res.json(updatedTask);
+    } catch (err) {
+      handleError(err, res);
+    }
+  });
+
+  app.delete("/api/tasks/:id", async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      const task = await storage.getTask(id);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      const success = await storage.deleteTask(id);
+      if (success) {
+        res.status(204).end();
+      } else {
+        res.status(500).json({ message: "Failed to delete task" });
+      }
+    } catch (err) {
       handleError(err, res);
     }
   });

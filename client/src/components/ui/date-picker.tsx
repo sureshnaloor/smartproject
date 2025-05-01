@@ -12,8 +12,10 @@ import {
 import { Input } from "@/components/ui/input"
 
 interface DatePickerProps {
-  date: Date | undefined
-  setDate: (date: Date | undefined) => void
+  value?: Date | string | null | undefined
+  onChange?: (date: Date | null) => void
+  selected?: Date | null
+  onSelect?: (date: Date | null) => void
   className?: string
   placeholder?: string
   disabled?: boolean
@@ -22,8 +24,10 @@ interface DatePickerProps {
 }
 
 export function DatePicker({
-  date,
-  setDate,
+  value,
+  onChange,
+  selected,
+  onSelect,
   className,
   placeholder = "Select date",
   disabled = false,
@@ -31,7 +35,24 @@ export function DatePicker({
   onBlur,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
-  const [dateInput, setDateInput] = React.useState<string>(date ? format(date, "yyyy-MM-dd") : "")
+  
+  // Support both value/onChange and selected/onSelect APIs
+  const actualValue = selected ?? value;
+  const handleChange = onSelect ?? onChange;
+  
+  // Convert string or Date to Date object for internal use
+  const getDateValue = (): Date | null | undefined => {
+    if (actualValue === null || actualValue === undefined) return actualValue;
+    if (actualValue instanceof Date) return actualValue;
+    const date = new Date(actualValue);
+    return !isNaN(date.getTime()) ? date : undefined;
+  }
+  
+  const date = getDateValue();
+  
+  const [dateInput, setDateInput] = React.useState<string>(
+    date ? format(date, "yyyy-MM-dd") : ""
+  )
 
   // Update the input field when date prop changes
   React.useEffect(() => {
@@ -40,21 +61,31 @@ export function DatePicker({
     } else {
       setDateInput("")
     }
-  }, [date])
+  }, [actualValue])
 
   // Handle direct input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
-    setDateInput(value)
+    const inputValue = e.target.value;
+    setDateInput(inputValue);
     
-    if (value) {
-      const inputDate = new Date(value)
+    if (inputValue && handleChange) {
+      const inputDate = new Date(inputValue);
       if (!isNaN(inputDate.getTime())) {
-        setDate(inputDate)
+        handleChange(inputDate);
       }
-    } else {
-      setDate(undefined)
+    } else if (handleChange) {
+      handleChange(null);
     }
+  }
+
+  // Handle calendar selection
+  const handleCalendarSelect = (date: Date | undefined) => {
+    if (date && handleChange) {
+      handleChange(date);
+    } else if (handleChange) {
+      handleChange(null);
+    }
+    setOpen(false);
   }
 
   // Handle input blur
@@ -88,12 +119,9 @@ export function DatePicker({
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar
             mode="single"
-            selected={date}
-            onSelect={(date) => {
-              setDate(date)
-              setOpen(false)
-            }}
-            disabled={disabledDates}
+            selected={date ?? undefined}
+            onSelect={handleCalendarSelect}
+            disabled={disabledDates || disabled}
             initialFocus
           />
         </PopoverContent>
@@ -106,7 +134,9 @@ export function DatePicker({
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
+        disabled={disabled}
       />
     </div>
   )
 }
+

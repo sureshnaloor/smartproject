@@ -53,6 +53,9 @@ export default function Reports() {
     queryKey: [`/api/projects/${projectId}`],
   });
 
+  // Get the project currency or default to USD if not available
+  const projectCurrency = project?.currency || "USD";
+
   // Fetch WBS items for the project
   const { data: wbsItems = [], isLoading: isLoadingWbs } = useQuery<WbsItem[]>({
     queryKey: [`/api/projects/${projectId}/wbs`],
@@ -101,76 +104,57 @@ export default function Reports() {
   );
   
   const overallCPI = calculateCPI(totalEarned, totalActual);
-  const overallSPI = calculateSPI(totalEarned, totalBudget * 0.45); // Assuming 45% planned progress
-
-  // Performance trend data (mock data - in a real app, this would come from historical snapshots)
-  const performanceTrendData = [
-    { date: "Jan 2023", cpi: 1.05, spi: 1.02 },
-    { date: "Feb 2023", cpi: 1.03, spi: 1.01 },
-    { date: "Mar 2023", cpi: 1.02, spi: 0.99 },
-    { date: "Apr 2023", cpi: 1.04, spi: 0.98 },
-    { date: "May 2023", cpi: 1.03, spi: 0.97 },
-    { date: "Jun 2023", cpi: 1.02, spi: 0.96 },
-    { date: "Jul 2023", cpi: overallCPI, spi: overallSPI },
-  ];
-
+  const overallSPI = calculateSPI(totalEarned, totalBudget * 0.45);
+  
   const isLoading = isLoadingProject || isLoadingWbs;
-
+  
   if (isLoading) {
     return (
-      <div className="p-4 space-y-6">
-        <div className="flex justify-between items-center mb-4">
-          <Skeleton className="h-10 w-40" />
-          <Skeleton className="h-10 w-60" />
+      <div className="p-4 space-y-4">
+        <Skeleton className="h-8 w-[300px]" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Skeleton className="h-[150px]" />
+          <Skeleton className="h-[150px]" />
+          <Skeleton className="h-[150px]" />
         </div>
-        <Skeleton className="h-[400px] w-full" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Skeleton className="h-[300px] w-full" />
-          <Skeleton className="h-[300px] w-full" />
-        </div>
+        <Skeleton className="h-[300px]" />
       </div>
     );
   }
 
+  // Custom tooltip formatter that uses the project currency
+  const currencyTooltipFormatter = (value: number) => formatCurrency(value, projectCurrency);
+
   return (
-    <div className="flex-1 overflow-auto p-4 bg-gray-50 space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Project Reports</h1>
-          <p className="text-sm text-gray-500">
-            Analysis and visualizations of project performance
-          </p>
-        </div>
-        
-        <div className="flex flex-wrap gap-3 items-center">
+    <div className="p-4 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">{project?.name} Reports</h1>
+        <div className="flex gap-2">
           <Select
             value={reportType}
             onValueChange={setReportType}
           >
             <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Select report type" />
+              <SelectValue placeholder="Report Type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="overview">Project Overview</SelectItem>
-              <SelectItem value="cost">Cost Analysis</SelectItem>
+              <SelectItem value="overview">Performance Overview</SelectItem>
+              <SelectItem value="budget">Budget Analysis</SelectItem>
               <SelectItem value="schedule">Schedule Analysis</SelectItem>
-              <SelectItem value="variance">Variance Analysis</SelectItem>
             </SelectContent>
           </Select>
-          
-          <Button variant="outline">
-            <Printer className="mr-2 h-4 w-4" />
-            Print
+          <Button variant="outline" size="icon">
+            <Printer className="h-4 w-4" />
           </Button>
-          
-          <Button variant="outline">
-            <Download className="mr-2 h-4 w-4" />
-            Export
+          <Button variant="outline" size="icon">
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="icon">
+            <Share2 className="h-4 w-4" />
           </Button>
         </div>
       </div>
-
-      {/* Project Overview */}
+      
       <Card>
         <CardHeader>
           <CardTitle>Project Performance Summary</CardTitle>
@@ -183,8 +167,8 @@ export default function Reports() {
             <div className="bg-white rounded-lg p-4 border border-gray-200">
               <div className="text-sm text-gray-500 mb-1">Budget vs Actual</div>
               <div className="flex items-end gap-2">
-                <div className="text-2xl font-semibold">{formatCurrency(totalActual)}</div>
-                <div className="text-sm text-gray-600 mb-1">of {formatCurrency(totalBudget)}</div>
+                <div className="text-2xl font-semibold">{formatCurrency(totalActual, projectCurrency)}</div>
+                <div className="text-sm text-gray-600 mb-1">of {formatCurrency(totalBudget, projectCurrency)}</div>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
                 <div 
@@ -208,10 +192,10 @@ export default function Reports() {
                 </div>
               </div>
               <div className="text-sm text-gray-500 mt-2">
-                Earned Value: {formatCurrency(totalEarned)}
+                Earned Value: {formatCurrency(totalEarned, projectCurrency)}
               </div>
               <div className="text-sm text-gray-500">
-                Actual Cost: {formatCurrency(totalActual)}
+                Actual Cost: {formatCurrency(totalActual, projectCurrency)}
               </div>
             </div>
             
@@ -226,10 +210,10 @@ export default function Reports() {
                 </div>
               </div>
               <div className="text-sm text-gray-500 mt-2">
-                Earned Value: {formatCurrency(totalEarned)}
+                Earned Value: {formatCurrency(totalEarned, projectCurrency)}
               </div>
               <div className="text-sm text-gray-500">
-                Planned Value: {formatCurrency(totalBudget * 0.45)}
+                Planned Value: {formatCurrency(totalBudget * 0.45, projectCurrency)}
               </div>
             </div>
           </div>
@@ -249,7 +233,7 @@ export default function Reports() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
-                <Tooltip formatter={(value) => formatCurrency(value)} />
+                <Tooltip formatter={currencyTooltipFormatter} />
                 <Legend />
                 <Bar dataKey="budget" name="Budget" fill="#8884d8" />
                 <Bar dataKey="actual" name="Actual Cost" fill="#82ca9d" />
@@ -259,20 +243,19 @@ export default function Reports() {
           </div>
         </CardContent>
       </Card>
-
+      
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Performance Trend Chart */}
         <Card>
           <CardHeader>
-            <CardTitle>Performance Indices Trend</CardTitle>
+            <CardTitle>Schedule Progress</CardTitle>
             <CardDescription>
-              CPI and SPI trends over time
+              Planned vs Actual progress over time
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart
-                data={performanceTrendData}
+                data={wbsChartData}
                 margin={{
                   top: 5,
                   right: 30,
@@ -281,36 +264,17 @@ export default function Reports() {
                 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis domain={[0.8, 1.2]} />
-                <Tooltip />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip formatter={currencyTooltipFormatter} />
                 <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="cpi" 
-                  name="CPI" 
-                  stroke="#8884d8" 
-                  activeDot={{ r: 8 }} 
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="spi" 
-                  name="SPI" 
-                  stroke="#82ca9d" 
-                />
-                {/* Reference line at 1.0 */}
-                <Line 
-                  dataKey={() => 1} 
-                  stroke="#ff7300" 
-                  strokeDasharray="3 3" 
-                  name="Target (1.0)" 
-                />
+                <Line type="monotone" dataKey="budget" name="Planned Value" stroke="#8884d8" />
+                <Line type="monotone" dataKey="earned" name="Earned Value" stroke="#82ca9d" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
-
-        {/* Budget Allocation Pie Chart */}
+        
         <Card>
           <CardHeader>
             <CardTitle>Budget Distribution</CardTitle>
@@ -336,7 +300,7 @@ export default function Reports() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value) => formatCurrency(value)} />
+                <Tooltip formatter={currencyTooltipFormatter} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
