@@ -19,6 +19,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// Create a custom TooltipPortal to ensure tooltips are rendered at the root level
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+const TooltipPortal = TooltipPrimitive.Portal;
+
 interface GanttChartProps {
   projectId: number;
   onAddActivity?: (parentId: number) => void;
@@ -731,7 +735,7 @@ function GanttItem({
         </div>
         <div className="relative h-8 py-1 flex">
           {item.type === "Activity" && (
-            <TooltipProvider delayDuration={300}>
+            <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div 
@@ -746,36 +750,49 @@ function GanttItem({
                     </div>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent className="p-0 bg-white rounded-md shadow-lg border border-gray-200">
-                  <div className="p-3 max-w-xs">
-                    <div className="font-medium text-sm">{item.name}</div>
-                    {item.startDate && item.endDate && (
-                      <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
-                        <div>
-                          <div className="text-gray-500">Start Date</div>
-                          <div className="font-medium">{formatDate(item.startDate)}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-500">End Date</div>
-                          <div className="font-medium">{formatDate(item.endDate)}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-500">Duration</div>
-                          <div className="font-medium">
-                            {Math.ceil(
-                              (new Date(item.endDate).getTime() - new Date(item.startDate).getTime()) / 
-                              (1000 * 60 * 60 * 24)
-                            ) + 1} days
+                <TooltipPortal>
+                  <TooltipContent 
+                    className="p-0 bg-white rounded-md shadow-lg border border-gray-200"
+                    sideOffset={10}
+                    side="top"
+                    align="center"
+                  >
+                    <div className="p-4 w-64">
+                      <div className="font-medium text-sm mb-2">{item.name}</div>
+                      {item.startDate && item.endDate && (
+                        <div className="grid grid-cols-2 gap-3 mt-2 text-xs">
+                          <div>
+                            <div className="text-gray-500 mb-0.5">Start Date</div>
+                            <div className="font-medium">{formatDate(item.startDate)}</div>
                           </div>
+                          <div>
+                            <div className="text-gray-500 mb-0.5">End Date</div>
+                            <div className="font-medium">{formatDate(item.endDate)}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-0.5">Duration</div>
+                            <div className="font-medium">
+                              {Math.ceil(
+                                (new Date(item.endDate).getTime() - new Date(item.startDate).getTime()) / 
+                                (1000 * 60 * 60 * 24)
+                              ) + 1} days
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 mb-0.5">Progress</div>
+                            <div className="font-medium">{formatPercent(item.percentComplete)}</div>
+                          </div>
+                          {item.description && (
+                            <div className="col-span-2 mt-1">
+                              <div className="text-gray-500 mb-0.5">Description</div>
+                              <div className="font-medium text-xs">{item.description}</div>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <div className="text-gray-500">Progress</div>
-                          <div className="font-medium">{formatPercent(item.percentComplete)}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </TooltipContent>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </TooltipPortal>
               </Tooltip>
             </TooltipProvider>
           )}
