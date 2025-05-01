@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, Dependency, InsertDependency } from "@shared/schema";
-import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle } from "lucide-react";
+import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { GanttChart } from "@/components/project/gantt-chart";
@@ -44,6 +44,7 @@ export default function Schedule() {
   const [dependencyType, setDependencyType] = useState<string>("FS");
   const [lag, setLag] = useState<number>(0);
   const debuggedItems = useRef(false);
+  const [isProcessingSchedule, setIsProcessingSchedule] = useState(false);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -271,6 +272,55 @@ export default function Schedule() {
     setIsAddActivityModalOpen(true);
   };
 
+  // Add finalize schedule mutation
+  const finalizeSchedule = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/projects/${projectId}/schedule/finalize`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}/wbs`] });
+      toast({
+        title: "Schedule Finalized",
+        description: `${data.updatedCount} activities have been updated based on dependencies.`,
+        variant: "default",
+      });
+      
+      if (data.errorCount > 0) {
+        console.error("Errors during schedule finalization:", data.errors);
+        toast({
+          title: "Some Updates Failed",
+          description: `${data.errorCount} activities could not be updated. Check console for details.`,
+          variant: "destructive",
+        });
+      }
+      
+      setIsProcessingSchedule(false);
+    },
+    onError: (error) => {
+      setIsProcessingSchedule(false);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to finalize schedule. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFinalizeSchedule = () => {
+    if (dependencies.length === 0) {
+      toast({
+        title: "No Dependencies",
+        description: "There are no dependencies to process. Add dependencies before finalizing the schedule.",
+        variant: "default",
+      });
+      return;
+    }
+    
+    setIsProcessingSchedule(true);
+    finalizeSchedule.mutate();
+  };
+
   // Define columns for dependency table
   const columns: ColumnDef<Dependency>[] = [
     {
@@ -367,9 +417,38 @@ export default function Schedule() {
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
             <CardTitle>Project Schedule</CardTitle>
+            <Button 
+              onClick={handleFinalizeSchedule}
+              disabled={isProcessingSchedule || dependencies.length === 0}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isProcessingSchedule ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <CalendarClock className="mr-2 h-4 w-4" />
+                  Finalize Schedule
+                </>
+              )}
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4 text-sm text-blue-800">
+            <p className="font-medium mb-1">Schedule Finalization:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Click "Finalize Schedule" to recalculate activity dates based on dependencies.</li>
+              <li>Activities will be adjusted to respect all dependency relationships (FS, SS, FF, SF) and lag values.</li>
+              <li>This process will override any manually set dates that would violate dependency constraints.</li>
+              <li>You can run this process multiple times as you add or update dependencies.</li>
+            </ul>
+          </div>
           <GanttChart projectId={projectId} onAddActivity={handleAddActivity} />
         </CardContent>
       </Card>

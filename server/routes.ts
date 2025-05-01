@@ -5,6 +5,11 @@ import { insertProjectSchema, insertWbsItemSchema, insertDependencySchema, inser
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
+import cors from "cors";
+import { DatabaseStorage } from "./storage";
+import { uploadMiddleware } from "./middleware";
+import { handleError } from "./error-handler";
+import { WbsItem, Dependency } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -1164,6 +1169,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error("Error importing activities:", err);
       handleError(err, res);
+    }
+  });
+
+  // Endpoint for finalizing a project schedule - simplified approach to avoid linter errors
+  app.post("/api/projects/:projectId/schedule/finalize", async (req: Request, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ message: "Invalid project ID" });
+      }
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      // Fetch all WBS items for the project
+      const wbsItems = await storage.getWbsItems(projectId);
+      
+      // Fetch all dependencies for the project
+      const dependencies = await storage.getProjectDependencies(projectId);
+      
+      // Keep track of updated items
+      const updatedItems: any[] = [];
+      const errors: string[] = [];
+
+      // Skip activity items that don't have dates
+      const activitiesWithDates = wbsItems.filter(
+        item => item.type === "Activity" && item.startDate && item.endDate
+      );
+
+      // Create a map for quick lookup
+      const itemMap = new Map();
+      activitiesWithDates.forEach(item => {
+        itemMap.set(item.id, { ...item });
+      });
+      
+      // Group dependencies by successor
+      const successorDeps = new Map();
+      dependencies.forEach(dep => {
+        const sucDeps = successorDeps.get(dep.successorId) || [];
+        sucDeps.push(dep);
+        successorDeps.set(dep.successorId, sucDeps);
+      });
+      
+      // Update dates based on dependencies
+      for (const item of activitiesWithDates) {
+        const deps = successorDeps.get(item.id);
+        if (!deps || deps.length === 0) continue;
+        
+        let newStartDate = new Date(item.startDate);
+        let newEndDate = new Date(item.endDate);
+        let datesChanged = false;
+        
+        for (const dep of deps) {
+          const predecessor = itemMap.get(dep.predecessorId);
+          if (!predecessor) continue;
+          
+          const predStartDate = new Date(predecessor.startDate);
+          const predEndDate = new Date(predecessor.endDate);
+          const lag = dep.lag || 0;
+          
+          // Apply constraints based on dependency type
+          switch (dep.type) {
+            case "FS": // Finish-to-Start: successor can't start until predecessor finishes
+              const fsDate = new Date(predEndDate);
+              fsDate.setDate(fsDate.getDate() + lag);
+              if (fsDate > newStartDate) {
+                // Calculate the shift in days
+                const shiftDays = Math.ceil((fsDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newStartDate = fsDate;
+                newEndDate.setDate(newEndDate.getDate() + shiftDays);
+                datesChanged = true;
+              }
+              break;
+              
+            case "SS": // Start-to-Start: successor can't start until predecessor starts
+              const ssDate = new Date(predStartDate);
+              ssDate.setDate(ssDate.getDate() + lag);
+              if (ssDate > newStartDate) {
+                // Calculate the shift in days
+                const shiftDays = Math.ceil((ssDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newStartDate = ssDate;
+                newEndDate.setDate(newEndDate.getDate() + shiftDays);
+                datesChanged = true;
+              }
+              break;
+              
+            case "FF": // Finish-to-Finish: successor can't finish until predecessor finishes
+              const ffDate = new Date(predEndDate);
+              ffDate.setDate(ffDate.getDate() + lag);
+              if (ffDate > newEndDate) {
+                // Keep the duration the same, shift both dates
+                const duration = Math.ceil((newEndDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newEndDate = ffDate;
+                newStartDate = new Date(newEndDate);
+                newStartDate.setDate(newStartDate.getDate() - duration);
+                datesChanged = true;
+              }
+              break;
+              
+            case "SF": // Start-to-Finish: successor can't finish until predecessor starts
+              const sfDate = new Date(predStartDate);
+              sfDate.setDate(sfDate.getDate() + lag);
+              if (sfDate > newEndDate) {
+                // Keep the duration the same, shift both dates
+                const duration = Math.ceil((newEndDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24));
+                newEndDate = sfDate;
+                newStartDate = new Date(newEndDate);
+                newStartDate.setDate(newStartDate.getDate() - duration);
+                datesChanged = true;
+              }
+              break;
+          }
+        }
+        
+        // If dates have changed, update the item
+        if (datesChanged) {
+          try {
+            const updatedItem = await storage.updateWbsItem(item.id, {
+              startDate: newStartDate,
+              endDate: newEndDate,
+              duration: Math.ceil((newEndDate.getTime() - newStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+            });
+            
+            updatedItems.push(updatedItem);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            errors.push(`Failed to update item ${item.id} (${item.code}): ${errorMessage}`);
+          }
+        }
+      }
+      
+      return res.status(200).json({
+        message: "Schedule finalized successfully",
+        updatedCount: updatedItems.length,
+        errorCount: errors.length,
+        errors
+      });
+    } catch (err: any) {
+      console.error("Error finalizing schedule:", err);
+      res.status(500).json({ 
+        message: err.message || "Internal server error" 
+      });
     }
   });
 
