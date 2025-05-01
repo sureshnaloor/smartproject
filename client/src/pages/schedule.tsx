@@ -447,7 +447,43 @@ export default function Schedule() {
   });
 
   const handleImportTasks = (importedTasks: Task[]) => {
-    importTasks.mutate(importedTasks);
+    // Process each task to ensure proper formatting, similar to handleCreateTask
+    const processedTasks = importedTasks.map(task => {
+      // Create a clean task object for each imported task
+      const processedTask: Task = {
+        activityId: task.activityId,
+        name: task.name,
+        description: task.description || "",
+        percentComplete: task.percentComplete || 0
+      };
+      
+      // Set projectId from the activity if available
+      const activity = wbsItems.find(a => a.id === task.activityId);
+      if (activity) {
+        processedTask.projectId = activity.projectId;
+      } else {
+        processedTask.projectId = projectId; // Fall back to current project ID
+      }
+      
+      // Only add startDate if it exists
+      if (task.startDate) {
+        processedTask.startDate = task.startDate;
+      }
+      
+      // Only add one of endDate or duration, not both
+      if (task.endDate) {
+        processedTask.endDate = task.endDate;
+      } else if (task.duration) {
+        processedTask.duration = task.duration;
+      }
+      
+      console.log("Processed task for import:", processedTask);
+      return processedTask;
+    });
+    
+    // Send the processed tasks to the API
+    console.log("Importing tasks:", processedTasks);
+    importTasks.mutate(processedTasks);
   };
 
   // Define task table columns

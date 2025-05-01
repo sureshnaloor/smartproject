@@ -265,19 +265,34 @@ export function ImportTaskModal({ isOpen, onClose, onImport, activities }: Impor
   };
 
   const downloadTaskTemplate = () => {
+    // Show available activity IDs for reference
     const activityOptionsContent = activities
+      .filter(a => a.type === "Activity") // Only list activities
       .map(a => `${a.id},${a.name}`)
       .join('\n');
 
+    // Standard headers
     const headers = 'name,description,activityId,startDate,endDate,duration,percentComplete';
-    const sampleData = `Task 1,Sample task description 1,${activities[0]?.id || 0},2023-05-01,2023-05-10,10,0
-Task 2,Sample task description 2,${activities[0]?.id || 0},2023-05-11,2023-05-20,10,50
-Task 3,Sample task description 3,${activities[0]?.id || 0},2023-05-21,2023-05-30,10,100`;
     
+    // Create sample data with the first valid activity ID, or fallback to a placeholder
+    const firstActivityId = activities.find(a => a.type === "Activity")?.id || "[ACTIVITY_ID]";
+    
+    // Sample data showing both options: with endDate or with duration
+    const sampleData = 
+`Task 1,Sample task description 1,${firstActivityId},2023-05-01,2023-05-10,,0
+Task 2,Sample task description 2,${firstActivityId},2023-05-11,,10,50
+Task 3,Sample task description 3,${firstActivityId},2023-05-21,2023-05-30,,100`;
+    
+    // Complete CSV content
     const csvContent = `${headers}\n${sampleData}`;
+    
+    // Add activity reference as a comment
     const activityOptionsNote = `\n\n# Available Activities (reference only, do not include in import):\n# ID,Name\n${activityOptionsContent}`;
     
+    // Combine everything
     const fullContent = csvContent + activityOptionsNote;
+    
+    // Create and trigger download
     const blob = new Blob([fullContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -441,7 +456,7 @@ async function parseTaskCsvFile(file: File, activities: WbsItem[]): Promise<{ da
           
           const rowData: any = {};
           headers.forEach((header, index) => {
-            rowData[header] = values[index].trim();
+            rowData[header] = values[index]?.trim() || '';
           });
           
           // Validate required fields
@@ -450,28 +465,65 @@ async function parseTaskCsvFile(file: File, activities: WbsItem[]): Promise<{ da
             continue;
           }
           
-          const activityId = parseInt(rowData.activityid);
-          if (isNaN(activityId) || !activityIds.includes(activityId)) {
-            result.errors.push(`Line ${i + 1}: Invalid or unknown activity ID ${rowData.activityid}`);
+          // Ensure activityId is correctly parsed as a number
+          let activityId: number;
+          try {
+            activityId = parseInt(rowData.activityid);
+            if (isNaN(activityId)) {
+              result.errors.push(`Line ${i + 1}: activityId must be a number`);
+              continue;
+            }
+          } catch (err) {
+            result.errors.push(`Line ${i + 1}: Invalid activityId format`);
             continue;
+          }
+          
+          if (!activityIds.includes(activityId)) {
+            result.errors.push(`Line ${i + 1}: Activity ID ${activityId} not found in project`);
+            continue;
+          }
+          
+          // Ensure numeric fields are properly parsed
+          let duration: number | undefined = undefined;
+          if (rowData.duration && rowData.duration.trim() !== '') {
+            duration = parseInt(rowData.duration);
+            if (isNaN(duration)) {
+              result.errors.push(`Line ${i + 1}: duration must be a number`);
+              continue;
+            }
+          }
+          
+          let percentComplete = 0;
+          if (rowData.percentcomplete && rowData.percentcomplete.trim() !== '') {
+            percentComplete = parseInt(rowData.percentcomplete);
+            if (isNaN(percentComplete)) {
+              result.errors.push(`Line ${i + 1}: percentComplete must be a number`);
+              continue;
+            }
           }
           
           // Validate that either duration or endDate is provided if startDate is provided
-          if (rowData.startdate && !rowData.duration && !rowData.enddate) {
-            result.errors.push(`Line ${i + 1}: Either duration or endDate must be provided`);
+          if (rowData.startdate && !duration && !rowData.enddate) {
+            result.errors.push(`Line ${i + 1}: Either duration or endDate must be provided when startDate is set`);
             continue;
           }
           
-          // Convert values to appropriate types
+          // Convert values to appropriate types for the Task interface
           const task: Task = {
             name: rowData.name,
             activityId: activityId,
             description: rowData.description || '',
             startDate: rowData.startdate || null,
             endDate: rowData.enddate || null,
-            duration: rowData.duration ? parseInt(rowData.duration) : undefined,
-            percentComplete: rowData.percentcomplete ? parseInt(rowData.percentcomplete) : 0
+            duration: duration,
+            percentComplete: percentComplete
           };
+          
+          // Set projectId from the matching activity
+          const activity = activities.find(a => a.id === activityId);
+          if (activity) {
+            task.projectId = activity.projectId;
+          }
           
           result.data.push(task);
         }
