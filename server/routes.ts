@@ -959,6 +959,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/wbs/activities/import", async (req: Request, res: Response) => {
+    try {
+      const { projectId, csvData } = req.body;
+      
+      if (!projectId || !csvData || !Array.isArray(csvData)) {
+        return res.status(400).json({ message: "Invalid request body" });
+      }
+
+      // Check if project exists
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      // Get all WBS items for the project to map codes to IDs
+      const wbsItems = await storage.getWbsItems(projectId);
+      const wbsItemsByCode = new Map(wbsItems.map(item => [item.code, item]));
+      
+      // Track any validation errors
+      const errors = [];
+      const results = [];
+
+      // Process each activity in the CSV data
+      for (let i = 0; i < csvData.length; i++) {
+        const row = csvData[i];
+        
+        // Skip invalid rows
+        if (!row.wbsCode) {
+          errors.push(`Row ${i + 1}: Missing required WBS code`);
+          continue;
+        }
+        
+        // Find the WBS item by code
+        const existingItem = wbsItemsByCode.get(row.wbsCode);
+        
+        // Check if the item exists
+        if (!existingItem) {
+          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' not found`);
+          continue;
+        }
+        
+        // Validate that the item is of type "Activity"
+        if (existingItem.type !== "Activity") {
+          errors.push(`Row ${i + 1}: WBS code '${row.wbsCode}' is not an Activity (type: ${existingItem.type})`);
+          continue;
+        }
+        
+        // Parse dates if provided
+        let startDate = null;
+        let endDate = null;
+        let duration = null;
+        
+        if (row.startDate) {
+          try {
+            startDate = new Date(row.startDate);
+            if (isNaN(startDate.getTime())) {
+              errors.push(`Row ${i + 1}: Invalid startDate format`);
+              continue;
+            }
+          } catch (e) {
+            errors.push(`Row ${i + 1}: Invalid startDate format`);
+            continue;
+          }
+        } else {
+          errors.push(`Row ${i + 1}: startDate is required for Activities`);
+          continue;
+        }
+        
+        if (row.endDate) {
+          try {
+            endDate = new Date(row.endDate);
+            if (isNaN(endDate.getTime())) {
+              errors.push(`Row ${i + 1}: Invalid endDate format`);
+              continue;
+            }
+          } catch (e) {
+            errors.push(`Row ${i + 1}: Invalid endDate format`);
+            continue;
+          }
+        }
+        
+        if (row.duration) {
+          duration = Number(row.duration);
+          if (isNaN(duration) || duration <= 0) {
+            errors.push(`Row ${i + 1}: Duration must be a positive number`);
+            continue;
+          }
+        }
+        
+        // Calculate missing values
+        if (startDate && endDate && !duration) {
+          // Calculate duration from start and end dates
+          const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+          duration = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include end day
+        } else if (startDate && duration && !endDate) {
+          // Calculate end date from start date and duration
+          endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + duration - 1); // -1 because duration includes the start day
+        }
+        
+        // Ensure dates are consistent
+        if (startDate && endDate && startDate > endDate) {
+          errors.push(`Row ${i + 1}: Start date cannot be after end date`);
+          continue;
+        }
+        
+        // Update activity data
+        const activityData = {
+          name: row.name || existingItem.name,
+          description: row.description !== undefined ? row.description : existingItem.description,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+          duration: duration || undefined,
+          percentComplete: row.percentComplete !== undefined ? Number(row.percentComplete) : existingItem.percentComplete
+        };
+        
+        try {
+          // Update the existing activity
+          const updatedItem = await storage.updateWbsItem(existingItem.id, activityData);
+          results.push({ ...updatedItem, status: "updated" });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push(`Row ${i + 1}: Failed to update Activity - ${errorMessage}`);
+        }
+      }
+      
+      // Return errors if any
+      if (errors.length > 0) {
+        return res.status(400).json({
+          message: "Some activities could not be updated",
+          errors,
+          results
+        });
+      }
+      
+      // Return success
+      return res.status(200).json({
+        message: "All activities updated successfully",
+        count: results.length,
+        results
+      });
+    } catch (err) {
+      console.error("Error importing activities:", err);
+      handleError(err, res);
+    }
+  });
+
   return httpServer;
 }
 

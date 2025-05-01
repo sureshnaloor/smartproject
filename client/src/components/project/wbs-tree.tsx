@@ -4,7 +4,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, UpdateWbsProgress } from "@shared/schema";
 import { formatCurrency, formatDate, formatPercent, formatShortDate, buildWbsHierarchy } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle, CheckCircle, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Edit, Trash2, Plus, Clipboard, PencilIcon, DollarSign, AlertCircle, CheckCircle, Loader2, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddWbsModal } from "./add-wbs-modal";
 import { EditWbsModal } from "./edit-wbs-modal";
@@ -43,6 +43,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ImportActivityModal } from "./import-activity-modal";
 
 interface WbsTreeProps {
   projectId: number;
@@ -650,6 +651,7 @@ function TreeItem({
 }: TreeItemProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isProgressDialogOpen, setIsProgressDialogOpen] = useState(false);
+  const [isImportActivityModalOpen, setIsImportActivityModalOpen] = useState(false);
   const [progress, setProgress] = useState(Number(item.percentComplete) || 0);
   const [actualCost, setActualCost] = useState(Number(item.actualCost) || 0);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(
@@ -937,6 +939,27 @@ function TreeItem({
                 </TooltipProvider>
               )}
               
+              {/* Import Activities button for WorkPackage items */}
+              {item.type === "WorkPackage" && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setIsImportActivityModalOpen(true)}
+                      >
+                        <FileUp className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Import Activities</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              
               {!item.isTopLevel && (
                 <TooltipProvider>
                   <Tooltip>
@@ -1108,6 +1131,14 @@ function TreeItem({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Import Activity Modal */}
+      <ImportActivityModal
+        isOpen={isImportActivityModalOpen}
+        onClose={() => setIsImportActivityModalOpen(false)}
+        projectId={projectId}
+        workPackageId={item.id}
+      />
     </>
   );
 }
