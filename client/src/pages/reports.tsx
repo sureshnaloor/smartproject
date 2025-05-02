@@ -45,7 +45,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Reports() {
   const params = useParams();
-  const projectId = parseInt(params.projectId);
+  const projectId = params.projectId ? parseInt(params.projectId) : 0;
   const [reportType, setReportType] = useState<string>("overview");
 
   // Fetch project data

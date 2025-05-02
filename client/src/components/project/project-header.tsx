@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Project, WbsItem } from "@shared/schema";
 import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils";
-import { FileSpreadsheet, ChartLine, GanttChart, Menu, MoreHorizontal, BarChart2, PencilIcon } from "lucide-react";
+import { FileSpreadsheet, ChartLine, GanttChart, Menu, MoreHorizontal, BarChart2, PencilIcon, ArrowLeft, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImportWbsModal } from "./import-wbs-modal";
 import { DeleteProjectDialog } from "./delete-project-dialog";
@@ -21,9 +21,10 @@ import {
 interface ProjectHeaderProps {
   projectId: number;
   onToggleSidebar?: () => void;
+  onClose?: () => void;
 }
 
-export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps) {
+export function ProjectHeader({ projectId, onToggleSidebar, onClose }: ProjectHeaderProps) {
   const [location, setLocation] = useLocation();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -79,74 +80,92 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
 
   return (
     <div className="bg-white border-b border-gray-200">
-      <div className="px-4 py-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between">
-        <div className="flex items-center">
-          {isMobile && (
-            <button 
-              onClick={onToggleSidebar}
-              className="mr-2 text-gray-500 hover:text-gray-700 md:hidden"
-            >
-              <Menu size={20} />
-            </button>
-          )}
+      {/* Project Basic Information */}
+      <div className="px-4 py-4 sm:px-6">
+        <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">{project.name}</h1>
+            <div className="flex items-center">
+              {onClose && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={onClose} 
+                  className="mr-2 text-gray-500 hover:text-gray-700"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-1" />
+                  <span className="sr-only md:not-sr-only md:inline-block">Back to Projects</span>
+                </Button>
+              )}
+              <h2 className="text-xl font-semibold text-gray-900 mr-2">
+                {project.name}
+              </h2>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-7 ml-2"
+                onClick={() => setIsEditModalOpen(true)}
+              >
+                <PencilIcon className="h-3 w-3 mr-1" />
+                Edit
+              </Button>
+            </div>
             <div className="mt-1 flex flex-wrap items-center text-sm text-gray-500">
-              <span className="font-medium text-primary-600">{formatCurrency(project.budget, project.currency || "USD")}</span>
-              <span className="mx-2">•</span>
-              <span>{formatDate(project.startDate)} - {formatDate(project.endDate)}</span>
-              <span className="mx-2">•</span>
-              <span className="flex items-center">
-                <span className={`h-2 w-2 rounded-full ${status.color} mr-1`}></span>
-                <span className={status.textColor}>{status.status}</span>
+              <span className="mr-6">
+                <strong>Budget:</strong> {formatCurrency(project.budget, project.currency || "USD")}
+              </span>
+              <span className="mr-6">
+                <strong>Timeline:</strong> {formatDate(project.startDate)} - {formatDate(project.endDate)}
+              </span>
+              <span className={`mr-6 flex items-center font-medium ${status.textColor}`}>
+                <span 
+                  className={`w-2 h-2 mr-1 rounded-full ${status.color}`}
+                ></span>
+                {status.status}
               </span>
             </div>
           </div>
-        </div>
-        <div className="mt-4 sm:mt-0 flex gap-2 flex-wrap items-center">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setIsImportModalOpen(true)}
-          >
-            <FileSpreadsheet className="mr-1.5 h-4 w-4" />
-            Import WBS Data
-          </Button>
-          <Button size="sm">
-            <ChartLine className="mr-1.5 h-4 w-4" />
-            Generate Report
-          </Button>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">More options</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Project Actions</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setIsEditModalOpen(true)}>
-                <PencilIcon className="mr-2 h-4 w-4" />
-                Edit Project
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-red-500 focus:text-red-500"
-                onSelect={(e) => e.preventDefault()}
-              >
-                <DeleteProjectDialog
-                  projectId={project.id}
-                  projectName={project.name}
-                  onSuccess={handleProjectDeleted}
-                  trigger={<div className="flex items-center w-full">Delete project</div>}
-                />
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setIsImportModalOpen(true)}
+            >
+              Import WBS
+            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="sr-only">More options</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Project Actions</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => setIsEditModalOpen(true)}>
+                  Edit project details
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>Export as PDF</DropdownMenuItem>
+                <DropdownMenuItem>Export as Excel</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-red-500 focus:text-red-500"
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  <DeleteProjectDialog
+                    projectId={project.id}
+                    projectName={project.name}
+                    onSuccess={handleProjectDeleted}
+                    trigger={<div className="flex items-center w-full">Delete project</div>}
+                  />
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
-      
+
       {/* Navigation Tabs */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-6 px-4 sm:px-6 overflow-x-auto">
@@ -192,6 +211,7 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
                   : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
               }`}
             >
+              <DollarSign className="inline-block h-4 w-4 mr-1" />
               Cost Control
             </a>
           </Link>
@@ -203,23 +223,25 @@ export function ProjectHeader({ projectId, onToggleSidebar }: ProjectHeaderProps
                   : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
               }`}
             >
-              <BarChart2 className="inline-block h-4 w-4 mr-1" />
+              <FileSpreadsheet className="inline-block h-4 w-4 mr-1" />
               Reports
             </a>
           </Link>
         </nav>
       </div>
 
+      {/* Import WBS Modal */}
       <ImportWbsModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
-        projectId={projectId}
+        projectId={project.id}
       />
 
+      {/* Edit Project Modal */}
       <EditProjectModal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
-        projectId={projectId}
+        projectId={project.id}
       />
     </div>
   );
