@@ -583,17 +583,32 @@ export default function Schedule() {
   };
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Project Schedule</h1>
-        <div className="space-x-2">
+    <div className="flex-1 overflow-auto p-4 bg-gray-50">
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold">Project Schedule</h1>
+          {isProcessingSchedule && (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              <CalendarClock className="w-3 h-3 mr-1" />
+              Processing
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
           <Button
-            onClick={handleFinalizeSchedule}
-            disabled={isProcessingSchedule}
-            className="bg-blue-600 hover:bg-blue-700"
+            onClick={() => {
+              setSelectedParentId(null);
+              setIsAddActivityModalOpen(true);
+            }}
+            variant="outline"
+            size="sm"
           >
-            <CalendarClock className="mr-2 h-4 w-4" />
-            {isProcessingSchedule ? "Processing..." : "Finalize Schedule"}
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Add Activity
+          </Button>
+          <Button onClick={handleFinalizeSchedule} size="sm">
+            <ArrowRightCircle className="mr-2 h-4 w-4" />
+            Calculate Schedule
           </Button>
         </div>
       </div>

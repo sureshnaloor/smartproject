@@ -74,16 +74,18 @@ export default function ProjectLayout({ children, projectId }: ProjectLayoutProp
         {/* Left Sidebar Navigation */}
         <SideNavigation currentProjectId={projectId} />
 
-        {/* Main Content Area */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Main Content Area - Updated to enable scrolling */}
+        <main className="flex-1 flex flex-col">
           {/* Project Header & Tabs */}
           <ProjectHeader 
             projectId={projectId} 
             onToggleSidebar={toggleSidebar} 
           />
 
-          {/* Content */}
-          {children}
+          {/* Content - Updated to enable scrolling with overflow-y-auto */}
+          <div className="flex-1 overflow-y-auto">
+            {children}
+          </div>
         </main>
       </div>
     </div>

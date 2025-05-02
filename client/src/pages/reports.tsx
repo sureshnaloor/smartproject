@@ -123,11 +123,11 @@ export default function Reports() {
   }
 
   // Custom tooltip formatter that uses the project currency
-  const currencyTooltipFormatter = (value: number) => formatCurrency(value, projectCurrency);
+  const currencyTooltipFormatter = (value: number) => formatCurrency(value, projectCurrency || "USD");
 
   return (
-    <div className="p-4 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="flex-1 overflow-auto p-4 bg-gray-50">
+      <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">{project?.name} Reports</h1>
         <div className="flex gap-2">
           <Select
