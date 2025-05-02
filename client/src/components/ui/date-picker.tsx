@@ -16,6 +16,9 @@ interface DatePickerProps {
   onChange?: (date: Date | null) => void
   selected?: Date | null
   onSelect?: (date: Date | null) => void
+  // Support for date and setDate props used in existing components
+  date?: Date | string | null | undefined
+  setDate?: (date: Date | null) => void
   className?: string
   placeholder?: string
   disabled?: boolean
@@ -28,6 +31,8 @@ export function DatePicker({
   onChange,
   selected,
   onSelect,
+  date,
+  setDate,
   className,
   placeholder = "Select date",
   disabled = false,
@@ -36,28 +41,28 @@ export function DatePicker({
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
   
-  // Support both value/onChange and selected/onSelect APIs
-  const actualValue = selected ?? value;
-  const handleChange = onSelect ?? onChange;
+  // Support both value/onChange and selected/onSelect and date/setDate APIs
+  const actualValue = selected ?? value ?? date;
+  const handleChange = onSelect ?? onChange ?? setDate;
   
   // Convert string or Date to Date object for internal use
   const getDateValue = (): Date | null | undefined => {
     if (actualValue === null || actualValue === undefined) return actualValue;
     if (actualValue instanceof Date) return actualValue;
-    const date = new Date(actualValue);
-    return !isNaN(date.getTime()) ? date : undefined;
+    const dateObj = new Date(actualValue);
+    return !isNaN(dateObj.getTime()) ? dateObj : undefined;
   }
   
-  const date = getDateValue();
+  const dateValue = getDateValue();
   
   const [dateInput, setDateInput] = React.useState<string>(
-    date ? format(date, "yyyy-MM-dd") : ""
+    dateValue ? format(dateValue, "yyyy-MM-dd") : ""
   )
 
   // Update the input field when date prop changes
   React.useEffect(() => {
-    if (date) {
-      setDateInput(format(date, "yyyy-MM-dd"))
+    if (dateValue) {
+      setDateInput(format(dateValue, "yyyy-MM-dd"))
     } else {
       setDateInput("")
     }
@@ -90,9 +95,9 @@ export function DatePicker({
 
   // Handle input blur
   const handleBlur = () => {
-    if (dateInput && !date) {
+    if (dateInput && !dateValue) {
       // If input is invalid, reset it
-      setDateInput(date ? format(date, "yyyy-MM-dd") : "")
+      setDateInput(dateValue ? format(dateValue, "yyyy-MM-dd") : "")
     }
     
     if (onBlur) {
@@ -108,18 +113,18 @@ export function DatePicker({
             variant="outline"
             className={cn(
               "w-full justify-start text-left font-normal",
-              !date && "text-muted-foreground"
+              !dateValue && "text-muted-foreground"
             )}
             disabled={disabled}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
-            {date ? format(date, "MMMM d, yyyy") : <span>{placeholder}</span>}
+            {dateValue ? format(dateValue, "MMMM d, yyyy") : <span>{placeholder}</span>}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar
             mode="single"
-            selected={date ?? undefined}
+            selected={dateValue ?? undefined}
             onSelect={handleCalendarSelect}
             disabled={disabledDates || disabled}
             initialFocus

@@ -423,28 +423,31 @@ export function WbsTree({ projectId }: WbsTreeProps) {
             </span>
           )}
         </div>
-        <div className="flex space-x-2">
+        <div className="flex space-x-1">
           <Button 
             variant="outline" 
             size="sm"
+            className="text-xs px-2 py-1 h-7"
             onClick={handleAddTopLevel}
             disabled={isLoading || isBudgetFinalized}
           >
-            <Plus className="h-4 w-4 mr-1" />
+            <Plus className="h-3.5 w-3.5 mr-1" />
             Add Top-Level
           </Button>
           <Button 
             variant="outline" 
             size="sm"
+            className="text-xs px-2 py-1 h-7"
             onClick={() => setIsImportWbsModalOpen(true)}
             disabled={isLoading || isBudgetFinalized}
           >
-            <FileUp className="h-4 w-4 mr-1" />
+            <FileUp className="h-3.5 w-3.5 mr-1" />
             Import WBS
           </Button>
           <Button 
             variant="outline" 
             size="sm"
+            className="text-xs px-2 py-1 h-7"
             onClick={() => {
               // Open the global import activities modal
               setSelectedWorkPackageId(null);
@@ -452,16 +455,17 @@ export function WbsTree({ projectId }: WbsTreeProps) {
             }}
             disabled={isLoading}
           >
-            <FileUp className="h-4 w-4 mr-1" />
+            <FileUp className="h-3.5 w-3.5 mr-1" />
             Import Activities
           </Button>
           <Button 
             variant="outline" 
             size="sm"
+            className="text-xs px-2 py-1 h-7"
             onClick={() => setIsFinalizingBudget(true)}
             disabled={isLoading || isBudgetFinalized || wbsItems.length === 0}
           >
-            <DollarSign className="h-4 w-4 mr-1" />
+            <DollarSign className="h-3.5 w-3.5 mr-1" />
             Finalize Budget
           </Button>
         </div>
@@ -476,17 +480,17 @@ export function WbsTree({ projectId }: WbsTreeProps) {
       ) : (
         <div className="overflow-auto flex-1 border border-gray-200 rounded-md">
           {project && (
-            <div className="p-4 mb-2 bg-gray-50 border-b border-gray-200">
-              <h4 className="text-sm font-semibold mb-2">Project Budget Summary</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-3 mb-2 bg-gray-50 border-b border-gray-200">
+              <h4 className="text-xs font-semibold mb-1">Project Budget Summary</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 <div>
                   <div className="text-xs text-gray-500">Total Project Budget</div>
-                  <div className="text-base font-bold">{formatCurrency(budgetUsage.projectBudget, projectCurrency)}</div>
+                  <div className="text-sm font-bold">{formatCurrency(budgetUsage.projectBudget, projectCurrency)}</div>
                 </div>
                 
                 <div>
                   <div className="text-xs text-gray-500">Allocated to WBS</div>
-                  <div className="text-base font-bold">
+                  <div className="text-sm font-bold">
                     {formatCurrency(budgetUsage.topLevelAllocated, projectCurrency)}
                     <span className="text-xs ml-1 font-normal">
                       ({formatPercent(budgetUsage.percentAllocated)})
@@ -505,7 +509,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
                 
                 <div>
                   <div className="text-xs text-gray-500">Work Package Budget Total</div>
-                  <div className="text-base font-bold">{formatCurrency(budgetUsage.workPackageTotal, projectCurrency)}</div>
+                  <div className="text-sm font-bold">{formatCurrency(budgetUsage.workPackageTotal, projectCurrency)}</div>
                   {budgetUsage.workPackageTotal !== budgetUsage.topLevelAllocated && !isBudgetFinalized && (
                     <div className="text-xs text-amber-600 flex items-center">
                       <AlertCircle className="h-3 w-3 mr-1" />
@@ -550,7 +554,7 @@ export function WbsTree({ projectId }: WbsTreeProps) {
             ) : (
               <div className="space-y-0">
                 {/* Table Headers */}
-                <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 font-medium text-sm bg-gray-100 border-b border-gray-200 sticky top-0">
+                <div className="grid grid-cols-[minmax(250px,_1fr)_repeat(6,_minmax(100px,_1fr))] px-4 py-2 font-medium text-sm bg-gray-100 border-b border-gray-200 sticky top-0">
                   <div>Name</div>
                   <div>Code</div>
                   <div>Type</div>
@@ -844,7 +848,7 @@ function TreeItem({
 
   return (
     <>
-      <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 hover:bg-gray-50 border-b border-gray-100">
+      <div className="grid grid-cols-[minmax(250px,_1fr)_repeat(6,_minmax(100px,_1fr))] px-4 py-2 hover:bg-gray-50 border-b border-gray-100">
         <div className="flex items-center">
           {item.type === "Summary" && (
             <button
@@ -961,25 +965,6 @@ function TreeItem({
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => onUpdateProgress(item)}
-                      disabled={updateProgress.isPending}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Update Progress</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
               
               {canHaveChildren && (
                 <TooltipProvider>
@@ -1036,7 +1021,7 @@ function TreeItem({
              }}>
           {isLoading ? (
             <div className="py-2 ml-8 animate-pulse">
-              <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 border-b border-gray-100">
+              <div className="grid grid-cols-[minmax(250px,_1fr)_repeat(6,_minmax(100px,_1fr))] px-4 py-2 border-b border-gray-100">
                 <Skeleton className="h-6 w-full ml-4" />
                 <Skeleton className="h-4 w-16" />
                 <Skeleton className="h-6 w-24" />
@@ -1045,7 +1030,7 @@ function TreeItem({
                 <Skeleton className="h-4 w-20" />
                 <Skeleton className="h-4 w-16" />
               </div>
-              <div className="grid grid-cols-[minmax(300px,_1fr)_repeat(6,_minmax(120px,_1fr))] px-4 py-2 border-b border-gray-100">
+              <div className="grid grid-cols-[minmax(250px,_1fr)_repeat(6,_minmax(100px,_1fr))] px-4 py-2 border-b border-gray-100">
                 <Skeleton className="h-6 w-full ml-4" />
                 <Skeleton className="h-4 w-16" />
                 <Skeleton className="h-6 w-24" />
@@ -1142,7 +1127,7 @@ function TreeItem({
                   <Label htmlFor="actual-end-date">Actual End Date</Label>
                   <DatePicker
                     date={selectedDate}
-                    setDate={setSelectedDate}
+                    setDate={(date) => setSelectedDate(date ? date : undefined)}
                   />
                 </div>
               </>

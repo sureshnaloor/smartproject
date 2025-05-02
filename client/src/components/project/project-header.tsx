@@ -101,12 +101,12 @@ export function ProjectHeader({ projectId, onToggleSidebar, onClose }: ProjectHe
               </h2>
               <Button 
                 variant="outline" 
-                size="sm" 
-                className="h-7 ml-2"
+                size="icon" 
+                className="h-7 w-7"
                 onClick={() => setIsEditModalOpen(true)}
               >
-                <PencilIcon className="h-3 w-3 mr-1" />
-                Edit
+                <PencilIcon className="h-3.5 w-3.5" />
+                <span className="sr-only">Edit</span>
               </Button>
             </div>
             <div className="mt-1 flex flex-wrap items-center text-sm text-gray-500">
