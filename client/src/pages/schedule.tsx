@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { WbsItem, Dependency, InsertDependency } from "@shared/schema";
-import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle, CalendarClock, ImportIcon, ListTodo, FileUp } from "lucide-react";
+import { Link, ArrowRight, PlusCircle, X, ArrowRightCircle, CalendarClock, ImportIcon, ListTodo, FileUp, GanttChartIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { GanttChart } from "@/components/project/gantt-chart";
@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { motion } from "framer-motion";
 
 // Define a Task interface
 interface Task {
@@ -583,162 +584,252 @@ export default function Schedule() {
   };
 
   return (
-    <div className="flex-1 overflow-auto p-4 bg-gray-50">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold">Project Schedule</h1>
-          {isProcessingSchedule && (
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-              <CalendarClock className="w-3 h-3 mr-1" />
-              Processing
-            </span>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              setSelectedParentId(null);
-              setIsAddActivityModalOpen(true);
-            }}
-            variant="outline"
-            size="sm"
+    <div className="flex-1 overflow-auto">
+      {/* Header section with indigo/purple gradient */}
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-100 border-b border-indigo-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="flex flex-col md:flex-row md:items-center md:justify-between"
           >
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Add Activity
-          </Button>
-          <Button onClick={handleFinalizeSchedule} size="sm">
-            <ArrowRightCircle className="mr-2 h-4 w-4" />
-            Calculate Schedule
-          </Button>
+            <div className="mb-4 md:mb-0">
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                <CalendarClock className="mr-2 h-6 w-6 text-indigo-600" />
+                Project Schedule
+              </h1>
+              <p className="text-gray-600 mt-1">
+                Plan and track project activities, dependencies, and timelines
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="bg-white hover:bg-indigo-50 border-indigo-200"
+                onClick={() => setIsAddActivityModalOpen(true)}
+              >
+                <PlusCircle className="mr-2 h-4 w-4 text-indigo-600" />
+                Add Activity
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="bg-white hover:bg-indigo-50 border-indigo-200"
+                onClick={() => setIsAddDependencyModalOpen(true)}
+              >
+                <ArrowRightCircle className="mr-2 h-4 w-4 text-indigo-600" />
+                Add Dependency
+              </Button>
+            </div>
+          </motion.div>
         </div>
       </div>
 
-      <Tabs defaultValue="schedule" value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="schedule">Schedule</TabsTrigger>
-          <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
-          <TabsTrigger value="resources">Resources</TabsTrigger>
-        </TabsList>
+      {/* Tab Navigation with a muted background */}
+      <div className="bg-gray-100 border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="mt-2 bg-white/70 border border-gray-200">
+              <TabsTrigger 
+                value="schedule" 
+                className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700"
+              >
+                <GanttChartIcon className="mr-2 h-4 w-4" />
+                Gantt Chart
+              </TabsTrigger>
+              <TabsTrigger 
+                value="dependencies"
+                className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700"
+              >
+                <Link className="mr-2 h-4 w-4" />
+                Dependencies
+              </TabsTrigger>
+              <TabsTrigger 
+                value="tasks"
+                className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700"
+              >
+                <ListTodo className="mr-2 h-4 w-4" />
+                Tasks
+              </TabsTrigger>
+            </TabsList>
+          
+            {/* Content section moved inside the Tabs component */}
+            <div className="bg-stone-50 min-h-[calc(100vh-200px)]">
+              <div className="max-w-7xl mx-auto py-6 px-0 md:px-4">
+                <TabsContent value="schedule" className="mt-4">
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Card className="border-indigo-100 shadow-sm">
+                      <CardHeader className="bg-white border-b border-indigo-100">
+                        <div className="flex justify-between items-center">
+                          <CardTitle className="text-lg text-gray-900">Project Gantt Chart</CardTitle>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={handleFinalizeSchedule}
+                              disabled={isProcessingSchedule}
+                              className="bg-white hover:bg-indigo-50 text-indigo-700 border-indigo-200"
+                            >
+                              {isProcessingSchedule ? "Processing..." : "Generate Schedule"}
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <div className="rounded-lg border border-gray-200 bg-white p-1">
+                          <GanttChart 
+                            projectId={projectId}
+                            onAddActivity={handleAddActivity}
+                            onAddTask={handleAddTask}
+                          />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                </TabsContent>
 
-        <TabsContent value="schedule" className="space-y-4">
-          <GanttChart 
-            projectId={projectId} 
-            onAddActivity={handleAddActivity}
-            onAddTask={handleAddTask}
-          />
-        </TabsContent>
+                <TabsContent value="dependencies" className="mt-4">
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Card className="border-indigo-100 shadow-sm">
+                      <CardHeader className="bg-white border-b border-indigo-100">
+                        <div className="flex justify-between items-center">
+                          <CardTitle className="text-lg text-gray-900">Activity Dependencies</CardTitle>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setIsAddDependencyModalOpen(true)}
+                            className="bg-white hover:bg-indigo-50 text-indigo-700 border-indigo-200"
+                          >
+                            <PlusCircle className="mr-2 h-4 w-4" />
+                            Add Dependency
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+                          {/* Keep your existing dependencies table */}
+                          {dependencies.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-8 text-center">
+                              <ListTodo className="h-12 w-12 text-gray-400 mb-4" />
+                              <h3 className="text-lg font-medium mb-2">No dependencies created yet. Add some dependencies to see them here.</h3>
+                            </div>
+                          ) : (
+                            dependencies.map((dep) => {
+                              const predecessor = wbsItems.find((item) => item.id === dep.predecessorId);
+                              const successor = wbsItems.find((item) => item.id === dep.successorId);
+                              
+                              return (
+                                <div key={`${dep.predecessorId}-${dep.successorId}`} className="flex justify-between items-center">
+                                  <div className="flex items-center gap-2">
+                                    <span>{predecessor?.name || `Item #${dep.predecessorId}`}</span>
+                                    <Badge variant="outline">{dep.type || "FS"}</Badge>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span>{dep.lag || 0} days</span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDeleteDependency(dep.predecessorId, dep.successorId)}
+                                    >
+                                      <X className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                </TabsContent>
 
-        <TabsContent value="dependencies" className="space-y-4">
-          {/* Dependencies content here */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center justify-between">
-                <span>Activity Dependencies</span>
-                <Button onClick={() => setIsAddDependencyModalOpen(true)} variant="outline" size="sm">
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Add Dependency
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Dependencies table */}
-              <div className="rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="p-2 text-left font-medium">Predecessor</th>
-                      <th className="p-2 text-left font-medium">Type</th>
-                      <th className="p-2 text-left font-medium">Lag</th>
-                      <th className="p-2 text-left font-medium">Successor</th>
-                      <th className="p-2 text-center font-medium">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dependencies.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="p-4 text-center text-muted-foreground">
-                          No dependencies created yet. Add some dependencies to see them here.
-                        </td>
-                      </tr>
-                    ) : (
-                      dependencies.map((dep) => {
-                        const predecessor = wbsItems.find((item) => item.id === dep.predecessorId);
-                        const successor = wbsItems.find((item) => item.id === dep.successorId);
-                        
-                        return (
-                          <tr key={`${dep.predecessorId}-${dep.successorId}`} className="border-t">
-                            <td className="p-2">{predecessor?.name || `Item #${dep.predecessorId}`}</td>
-                            <td className="p-2">
-                              <Badge variant="outline">{dep.type || "FS"}</Badge>
-                            </td>
-                            <td className="p-2">{dep.lag || 0} days</td>
-                            <td className="p-2">{successor?.name || `Item #${dep.successorId}`}</td>
-                            <td className="p-2 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteDependency(dep.predecessorId, dep.successorId)}
-                              >
-                                <X className="h-4 w-4 text-red-500" />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                <TabsContent value="tasks" className="mt-4">
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Card className="border-indigo-100 shadow-sm">
+                      <CardHeader className="bg-white border-b border-indigo-100">
+                        <div className="flex justify-between items-center">
+                          <CardTitle className="text-lg text-gray-900">Task Management</CardTitle>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => setIsImportTasksModalOpen(true)}
+                              className="bg-white hover:bg-indigo-50 text-indigo-700 border-indigo-200"
+                            >
+                              <ImportIcon className="mr-2 h-4 w-4" />
+                              Import Tasks
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => {
+                                if (wbsItems.filter(item => item.type === "Activity").length > 0) {
+                                  setSelectedActivityId(null);
+                                  setIsAddTaskModalOpen(true);
+                                } else {
+                                  toast({
+                                    title: "Error",
+                                    description: "You need to create at least one activity before adding tasks.",
+                                    variant: "destructive",
+                                  });
+                                }
+                              }}
+                              className="bg-white hover:bg-indigo-50 text-indigo-700 border-indigo-200"
+                            >
+                              <PlusCircle className="mr-2 h-4 w-4" />
+                              Add Task
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+                          {tasks.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-8 text-center">
+                              <ListTodo className="h-12 w-12 text-gray-400 mb-4" />
+                              <h3 className="text-lg font-medium mb-2">No Tasks Created</h3>
+                              <p className="text-muted-foreground mb-4 max-w-md">
+                                Tasks are the smallest unit of work assigned to resources. Create tasks for activities to track individual work items.
+                              </p>
+                              <div className="flex space-x-4">
+                                <Button onClick={() => setIsAddTaskModalOpen(true)} variant="default">
+                                  <PlusCircle className="mr-2 h-4 w-4" />
+                                  Add Task
+                                </Button>
+                                <Button onClick={() => setIsImportTasksModalOpen(true)} variant="outline">
+                                  <FileUp className="mr-2 h-4 w-4" />
+                                  Import from CSV
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <DataTable columns={taskColumns} data={tasks} />
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                </TabsContent>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="resources" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center justify-between">
-                <span>Task Management</span>
-                <div className="space-x-2">
-                  <Button onClick={() => setIsImportTasksModalOpen(true)} variant="outline" size="sm">
-                    <ImportIcon className="mr-2 h-4 w-4" />
-                    Import Tasks
-                  </Button>
-                  <Button onClick={() => {
-                    setSelectedActivityId(null);
-                    setIsAddTaskModalOpen(true);
-                  }} variant="default" size="sm">
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Add Task
-                  </Button>
-                </div>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {tasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <ListTodo className="h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium mb-2">No Tasks Created</h3>
-                  <p className="text-muted-foreground mb-4 max-w-md">
-                    Tasks are the smallest unit of work assigned to resources. Create tasks for activities to track individual work items.
-                  </p>
-                  <div className="flex space-x-4">
-                    <Button onClick={() => setIsAddTaskModalOpen(true)} variant="default">
-                      <PlusCircle className="mr-2 h-4 w-4" />
-                      Add Task
-                    </Button>
-                    <Button onClick={() => setIsImportTasksModalOpen(true)} variant="outline">
-                      <FileUp className="mr-2 h-4 w-4" />
-                      Import from CSV
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <DataTable columns={taskColumns} data={tasks} />
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </div>
+          </Tabs>
+        </div>
+      </div>
 
       {/* Add Dependency Modal */}
       <Dialog open={isAddDependencyModalOpen} onOpenChange={setIsAddDependencyModalOpen}>

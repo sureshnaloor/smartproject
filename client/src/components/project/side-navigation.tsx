@@ -9,7 +9,12 @@ import {
   BringToFront,
   Settings,
   Download,
-  Plus
+  Plus,
+  Activity,
+  ListTodo,
+  Users,
+  PieChart,
+  FileText
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useMobile } from "@/hooks/use-mobile";
@@ -20,7 +25,7 @@ interface SideNavigationProps {
 }
 
 export function SideNavigation({ currentProjectId }: SideNavigationProps) {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [isAddProjectModalOpen, setIsAddProjectModalOpen] = useState(false);
   const isMobile = useMobile();
   const [isOpen, setIsOpen] = useState(!isMobile);
@@ -37,6 +42,11 @@ export function SideNavigation({ currentProjectId }: SideNavigationProps) {
 
   // Get the current project
   const currentProject = projects.find(project => project.id === currentProjectId);
+
+  // Check if a path is active
+  const isActive = (path: string) => {
+    return location.includes(path);
+  };
 
   if (isMobile && !isOpen) {
     return (
@@ -93,25 +103,102 @@ export function SideNavigation({ currentProjectId }: SideNavigationProps) {
                 </svg>
               </div>
             ) : (
-              <ul className="py-2">
-                {projects.map((project) => (
-                  <li key={project.id}>
-                    <Link href={`/projects/${project.id}`}>
-                      <a className={cn(
-                        "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
-                        currentProjectId === project.id && "text-primary-600 font-medium bg-primary-50"
-                      )}>
-                        {currentProjectId === project.id ? (
-                          <Building2 className="mr-3 h-5 w-5" />
-                        ) : (
-                          <Building className="mr-3 h-5 w-5" />
-                        )}
-                        <span className="truncate">{project.name}</span>
-                      </a>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="py-2">
+                  {projects.map((project) => (
+                    <li key={project.id}>
+                      <Link href={`/projects/${project.id}`}>
+                        <a className={cn(
+                          "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
+                          currentProjectId === project.id && "text-primary-600 font-medium bg-primary-50"
+                        )}>
+                          {currentProjectId === project.id ? (
+                            <Building2 className="mr-3 h-5 w-5" />
+                          ) : (
+                            <Building className="mr-3 h-5 w-5" />
+                          )}
+                          <span className="truncate">{project.name}</span>
+                        </a>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+
+                {currentProjectId && (
+                  <>
+                    <div className="px-4 py-2 border-t border-gray-200">
+                      <h2 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        Project Tools
+                      </h2>
+                    </div>
+                    <ul className="py-1">
+                      <li>
+                        <Link href={`/under-construction/Activity-Master`}>
+                          <a className={cn(
+                            "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
+                            isActive('/under-construction/Activity-Master') && "text-teal-600 font-medium bg-teal-50"
+                          )}>
+                            <Activity className="mr-3 h-5 w-5" />
+                            <span>Activity Master</span>
+                          </a>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link href={`/under-construction/Task-Master`}>
+                          <a className={cn(
+                            "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
+                            isActive('/under-construction/Task-Master') && "text-teal-600 font-medium bg-teal-50"
+                          )}>
+                            <ListTodo className="mr-3 h-5 w-5" />
+                            <span>Task Master</span>
+                          </a>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link href={`/under-construction/Resource-Master`}>
+                          <a className={cn(
+                            "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
+                            isActive('/under-construction/Resource-Master') && "text-teal-600 font-medium bg-teal-50"
+                          )}>
+                            <Users className="mr-3 h-5 w-5" />
+                            <span>Resource Master</span>
+                          </a>
+                        </Link>
+                      </li>
+                    </ul>
+
+                    <div className="px-4 py-2 border-t border-gray-200">
+                      <h2 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        Reports & Analytics
+                      </h2>
+                    </div>
+                    <ul className="py-1">
+                      <li>
+                        <Link href={`/under-construction/Charts`}>
+                          <a className={cn(
+                            "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
+                            isActive('/under-construction/Charts') && "text-teal-600 font-medium bg-teal-50"
+                          )}>
+                            <PieChart className="mr-3 h-5 w-5" />
+                            <span>Charts</span>
+                          </a>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link href={`/under-construction/Reports`}>
+                          <a className={cn(
+                            "flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50",
+                            isActive('/under-construction/Reports') && "text-teal-600 font-medium bg-teal-50"
+                          )}>
+                            <FileText className="mr-3 h-5 w-5" />
+                            <span>Reports</span>
+                          </a>
+                        </Link>
+                      </li>
+                    </ul>
+                  </>
+                )}
+              </>
             )}
           </div>
           

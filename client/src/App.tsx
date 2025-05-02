@@ -9,6 +9,7 @@ import WbsStructure from "@/pages/wbs-structure";
 import Schedule from "@/pages/schedule";
 import CostControl from "@/pages/cost-control";
 import Reports from "@/pages/reports";
+import UnderConstruction from "@/pages/under-construction";
 import ProjectLayout from "@/layouts/project-layout";
 
 // Implementing a flatter routing approach without nesting
@@ -59,6 +60,13 @@ function Router() {
           <ProjectLayout projectId={parseInt(params.projectId)}>
             <Reports />
           </ProjectLayout>
+        )}
+      </Route>
+      
+      {/* Under Construction Pages */}
+      <Route path="/under-construction/:pageName">
+        {params => (
+          <UnderConstruction />
         )}
       </Route>
       
