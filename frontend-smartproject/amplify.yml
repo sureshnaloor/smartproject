@@ -3,7 +3,11 @@ frontend:
   phases:
     preBuild:
       commands:
+        - pwd
+        - ls -la
         - cd frontend-smartproject
+        - pwd
+        - ls -la
         - npm ci
     build:
       commands:

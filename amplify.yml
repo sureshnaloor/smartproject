@@ -6,9 +6,9 @@ frontend:
         - npm ci
     build:
       commands:
-        - npm run build:client
+        - npm run build
   artifacts:
-    baseDirectory: dist/client
+    baseDirectory: dist
     files:
       - '**/*'
   cache:
