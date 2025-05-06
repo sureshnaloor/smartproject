@@ -3,14 +3,15 @@ frontend:
   phases:
     preBuild:
       commands:
+        - cd frontend-smartproject
         - npm ci
     build:
       commands:
         - npm run build
   artifacts:
-    baseDirectory: dist
+    baseDirectory: frontend-smartproject/dist
     files:
       - '**/*'
   cache:
     paths:
-      - node_modules/**/* 
+      - frontend-smartproject/node_modules/**/* 
