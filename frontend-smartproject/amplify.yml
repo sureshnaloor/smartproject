@@ -1,6 +1,22 @@
 version: 1
 applications:
-  - appRoot: .
+  - frontend:
+      phases:
+        preBuild:
+          commands:
+            - cd frontend-smartproject
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: frontend-smartproject/dist
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - frontend-smartproject/node_modules/**/*
+    appRoot: .
     backend:
       phases:
         preBuild:
@@ -9,19 +25,4 @@ applications:
         build:
           commands:
             - npm run build
-    frontend:
-      phases:
-        preBuild:
-          commands:
-            - npm ci
-        build:
-          commands:
-            - npm run build
-      artifacts:
-        baseDirectory: dist
-        files:
-          - '**/*'
-      cache:
-        paths:
-          - node_modules/**/*
     buildSpec: amplify-fullstack.yml 
