@@ -10,12 +10,12 @@ applications:
           commands:
             - npm run build
       artifacts:
-        baseDirectory: frontend-smartproject/dist
+        baseDirectory: dist
         files:
           - '**/*'
       cache:
         paths:
-          - frontend-smartproject/node_modules/**/*
+          - node_modules/**/*
     appRoot: .
     backend:
       phases:
