@@ -11,6 +11,11 @@ app.use(corsMiddleware);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Health check endpoint
+app.get('/api/hello', (req, res) => {
+  res.status(200).json({ status: 'healthy', message: 'API is running' });
+});
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;

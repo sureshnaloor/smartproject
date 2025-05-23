@@ -2,10 +2,13 @@
   "name": "backend-smartproject",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "NODE_ENV=development tsx src/index.ts",
     "build": "tsc",
-    "start": "NODE_ENV=production node dist/index.js",
+    "start": "NODE_ENV=production tsx src/index.ts",
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "db:migrate": "node migrate-wbs-dates.cjs"
@@ -23,6 +26,7 @@
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "pg": "^8.15.6",
+    "tsx": "^4.19.1",
     "ws": "^8.18.0",
     "zod": "^3.23.8",
     "zod-validation-error": "^3.4.0"
@@ -38,7 +42,6 @@
     "@types/pg": "^8.11.14",
     "@types/ws": "^8.5.13",
     "drizzle-kit": "^0.30.4",
-    "tsx": "^4.19.1",
     "typescript": "5.6.3"
   },
   "optionalDependencies": {
